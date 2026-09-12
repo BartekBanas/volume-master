@@ -154,25 +154,24 @@ async function fallBackNative(tabId: number): Promise<void> {
   await closeOffscreenIfEmpty();
 }
 
-async function activeTabInLastFocusedWindow(): Promise<chrome.tabs.Tab | undefined> {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (tab?.id !== undefined) return tab;
-  const win = await chrome.windows.getLastFocused({ populate: true }).catch(() => undefined);
-  return win?.tabs?.find((candidate) => candidate.active);
-}
-
-async function updateBadge(): Promise<void> {
-  const tab = await activeTabInLastFocusedWindow();
-  // No focused Chrome window (clicked another app, or the popup stole focus).
-  // Leave the existing badge; do not treat that as "this tab is untouched."
-  if (!tab?.id) return;
-  const state = tabs.get(tab.id);
+async function paintBadge(tabId: number): Promise<void> {
+  const state = tabs.get(tabId);
   if (!state?.touched) {
-    await chrome.action.setBadgeText({ text: "" });
+    await chrome.action.setBadgeText({ tabId, text: "" }).catch(() => undefined);
     return;
   }
-  await chrome.action.setBadgeBackgroundColor({ color: "#1c1c24" });
-  await chrome.action.setBadgeText({ text: String(state.percent) });
+  await chrome.action
+    .setBadgeBackgroundColor({ tabId, color: "#1c1c24" })
+    .catch(() => undefined);
+  await chrome.action
+    .setBadgeText({ tabId, text: String(state.percent) })
+    .catch(() => undefined);
+}
+
+async function paintAllBadges(): Promise<void> {
+  await chrome.action.setBadgeText({ text: "" }).catch(() => undefined);
+  await chrome.action.setBadgeBackgroundColor({ color: "#1c1c24" }).catch(() => undefined);
+  await Promise.all([...tabs.keys()].map((id) => paintBadge(id)));
 }
 
 async function tabCapturable(tabId: number): Promise<boolean> {
@@ -201,7 +200,7 @@ async function setGain(tabId: number, percent: number): Promise<TabStateView> {
     await detachTab(tabId);
     await remember(tabId, { percent: NATIVE_PERCENT, touched: true });
     await closeOffscreenIfEmpty();
-    await updateBadge();
+    await paintBadge(tabId);
     return view(tabId, true);
   }
 
@@ -222,7 +221,7 @@ async function setGain(tabId: number, percent: number): Promise<TabStateView> {
     await fallBackNative(tabId);
   }
 
-  await updateBadge();
+  await paintBadge(tabId);
   return view(tabId, true);
 }
 
@@ -234,7 +233,7 @@ async function recapture(tabId: number): Promise<void> {
     await capture(tabId, state.percent);
   } catch {
     needsRecapture.add(tabId);
-    await updateBadge();
+    await paintBadge(tabId);
   }
 }
 
@@ -257,7 +256,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     await forget(tabId);
     await detachTab(tabId);
     await closeOffscreenIfEmpty();
-    await updateBadge();
   });
 });
 
@@ -266,15 +264,6 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status !== "complete" || !needsRecapture.has(tabId)) return;
   needsRecapture.delete(tabId);
   void ready.then(() => recapture(tabId));
-});
-
-chrome.tabs.onActivated.addListener(() => {
-  void ready.then(() => updateBadge());
-});
-
-chrome.windows.onFocusChanged.addListener((windowId) => {
-  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
-  void ready.then(() => updateBadge());
 });
 
 function restorableState(
@@ -321,4 +310,4 @@ chrome.tabCapture.onStatusChanged.addListener((info) => {
   void syncWindowFullscreen(info.tabId, info.fullscreen, info.status);
 });
 
-void ready.then(() => updateBadge());
+void ready.then(() => paintAllBadges());
