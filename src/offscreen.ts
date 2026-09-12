@@ -5,6 +5,7 @@ type Graph = {
   stream: MediaStream;
   source: MediaStreamAudioSourceNode;
   gain: GainNode;
+  percent: number;
 };
 
 const ctx = new AudioContext();
@@ -47,13 +48,14 @@ async function attach(tabId: number, streamId: string, percent: number): Promise
   const gain = ctx.createGain();
   gain.gain.value = percentToGain(percent);
   source.connect(gain).connect(ctx.destination);
-  graphs.set(tabId, { stream, source, gain });
+  graphs.set(tabId, { stream, source, gain, percent });
 }
 
 function setGain(tabId: number, percent: number): void {
   const graph = graphs.get(tabId);
   if (!graph) return;
   if (percent === NATIVE_PERCENT) return;
+  graph.percent = percent;
   rampGain(graph.gain, percent);
 }
 
@@ -72,6 +74,14 @@ async function handle(message: OffscreenRequest): Promise<unknown> {
       return { ok: true, captured: graphs.has(message.tabId) };
     case "isEmpty":
       return { ok: true, empty: graphs.size === 0 };
+    case "listTabs":
+      return {
+        ok: true,
+        tabs: [...graphs.entries()].map(([tabId, graph]) => ({
+          tabId,
+          percent: graph.percent,
+        })),
+      };
   }
 }
 

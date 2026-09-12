@@ -138,9 +138,20 @@ reset.addEventListener("click", () => {
   void apply(NATIVE_PERCENT, true);
 });
 
-const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+async function resolveTab(): Promise<chrome.tabs.Tab | undefined> {
+  const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (current?.id !== undefined) return current;
+  const [last] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (last?.id !== undefined) return last;
+  const win = await chrome.windows.getLastFocused({ populate: true }).catch(() => undefined);
+  return win?.tabs?.find((candidate) => candidate.active);
+}
+
+const tab = await resolveTab();
 tabId = tab?.id;
-if (tabId === undefined || !isCapturableUrl(tab?.url)) {
+// Missing url is normal when the window was not focused yet (activeTab).
+// Only treat the page as blocked when we actually have a blocked url.
+if (tabId === undefined || (tab?.url !== undefined && !isCapturableUrl(tab.url))) {
   paint({ percent: NATIVE_PERCENT, touched: false, capturable: false });
 } else {
   paint(await send({ target: "background", type: "getState", tabId }));

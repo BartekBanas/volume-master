@@ -22,7 +22,8 @@ export type OffscreenRequest =
   | { target: "offscreen"; type: "setGain"; tabId: number; percent: number }
   | { target: "offscreen"; type: "detach"; tabId: number }
   | { target: "offscreen"; type: "hasTab"; tabId: number }
-  | { target: "offscreen"; type: "isEmpty" };
+  | { target: "offscreen"; type: "isEmpty" }
+  | { target: "offscreen"; type: "listTabs" };
 
 const BLOCKED_PROTOCOLS = new Set([
   "chrome:",
