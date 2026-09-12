@@ -55,29 +55,25 @@ export function isCapturableUrl(url: string | undefined): boolean {
   return true;
 }
 
+export const SLIDER_GAMMA = 2;
+
 export function clampPercent(raw: number): number {
   if (!Number.isFinite(raw)) return NATIVE_PERCENT;
   return Math.min(MAX_PERCENT, Math.max(0, raw));
 }
 
 export function snapPercent(raw: number): number {
-  const n = Math.round(clampPercent(raw));
-  if (n <= NATIVE_PERCENT) return n;
-  const steps = Math.max(1, Math.round((n - NATIVE_PERCENT) / 5));
-  return Math.min(MAX_PERCENT, NATIVE_PERCENT + steps * 5);
+  if (!Number.isFinite(raw)) return NATIVE_PERCENT;
+  return Math.min(MAX_PERCENT, Math.max(0, Math.round(raw)));
 }
 
-export function nextPercent(prev: number, raw: number): number {
-  const clamped = Math.round(clampPercent(raw));
-  if (prev <= NATIVE_PERCENT && clamped > NATIVE_PERCENT) {
-    return clamped >= 103 ? snapPercent(clamped) : 105;
-  }
-  if (prev >= 105 && clamped > NATIVE_PERCENT && clamped < 105) {
-    return NATIVE_PERCENT;
-  }
-  return snapPercent(clamped);
+/** Map a linear slider position (0–MAX) onto volume percent. Steeper at the top. */
+export function percentFromPosition(position: number): number {
+  const t = snapPercent(position) / MAX_PERCENT;
+  return snapPercent(MAX_PERCENT * t ** SLIDER_GAMMA);
 }
 
-export function sliderStep(percent: number): number {
-  return percent <= NATIVE_PERCENT ? 1 : 5;
+export function positionFromPercent(percent: number): number {
+  const p = snapPercent(percent) / MAX_PERCENT;
+  return Math.round(MAX_PERCENT * p ** (1 / SLIDER_GAMMA));
 }

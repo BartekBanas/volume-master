@@ -2,13 +2,14 @@ import {
   isCapturableUrl,
   MAX_PERCENT,
   NATIVE_PERCENT,
-  nextPercent,
-  sliderStep,
+  percentFromPosition,
+  positionFromPercent,
   type BackgroundRequest,
   type TabStateView,
 } from "./messages.js";
 
 const slider = document.querySelector("#slider") as HTMLInputElement;
+const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
 const readout = document.querySelector("#readout") as HTMLParagraphElement;
 const reset = document.querySelector("#reset") as HTMLButtonElement;
 const note = document.querySelector("#note") as HTMLParagraphElement;
@@ -16,7 +17,11 @@ const badge = document.querySelector("#badge") as HTMLSpanElement;
 const panel = document.querySelector("main") as HTMLElement;
 
 let tabId: number | undefined;
-let percent = NATIVE_PERCENT;
+
+sliderWrap.style.setProperty(
+  "--native-ratio",
+  String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
+);
 
 type Rgb = [number, number, number];
 type Stop = [percent: number, color: Rgb];
@@ -73,12 +78,18 @@ function badgeLabel(value: number, capturable: boolean): string {
   return "Native";
 }
 
-function paint(state: TabStateView): void {
-  percent = state.percent;
+function positionRatio(position: number): number {
+  return position / MAX_PERCENT;
+}
+
+function setSliderPosition(position: number): void {
   slider.max = String(MAX_PERCENT);
-  slider.value = String(state.percent);
-  slider.step = String(sliderStep(state.percent));
-  slider.style.setProperty("--pct", `${(state.percent / MAX_PERCENT) * 100}%`);
+  slider.value = String(position);
+  slider.style.setProperty("--ratio", String(positionRatio(position)));
+}
+
+function paint(state: TabStateView, syncSlider = true): void {
+  if (syncSlider) setSliderPosition(positionFromPercent(state.percent));
   readout.innerHTML = `${state.percent}<span class="unit">%</span>`;
   badge.textContent = badgeLabel(state.percent, state.capturable);
   paintTheme(state.capturable ? state.percent : NATIVE_PERCENT);
@@ -93,33 +104,38 @@ async function send(request: BackgroundRequest): Promise<TabStateView> {
 }
 
 let pending: number | undefined;
+let pendingSync = false;
 let sending = false;
 
-async function apply(next: number): Promise<void> {
+async function apply(next: number, syncSlider = false): Promise<void> {
   pending = next;
+  pendingSync = pendingSync || syncSlider;
   if (sending) return;
   sending = true;
   while (pending !== undefined && tabId !== undefined) {
     const value = pending;
+    const sync = pendingSync;
     pending = undefined;
+    pendingSync = false;
     const state = await send({
       target: "background",
       type: "setGain",
       tabId,
       percent: value,
     });
-    paint(state);
+    paint(state, sync);
   }
   sending = false;
 }
 
 slider.addEventListener("input", () => {
-  const next = nextPercent(percent, Number(slider.value));
-  void apply(next);
+  const position = Number(slider.value);
+  slider.style.setProperty("--ratio", String(positionRatio(position)));
+  void apply(percentFromPosition(position));
 });
 
 reset.addEventListener("click", () => {
-  void apply(NATIVE_PERCENT);
+  void apply(NATIVE_PERCENT, true);
 });
 
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
