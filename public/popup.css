@@ -1,0 +1,62 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 260px;
+  font: 13px/1.4 system-ui, sans-serif;
+  background: #15161a;
+  color: #e8eaed;
+}
+
+main {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#readout {
+  margin: 0;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="range"] {
+  width: 100%;
+  margin: 0;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: #2b2f36;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#note {
+  margin: 0;
+  color: #b8bdc6;
+}
+
+#note[hidden] {
+  display: none;
+}
