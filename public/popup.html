@@ -7,10 +7,36 @@
   </head>
   <body>
     <main>
-      <h1>Volume Master</h1>
-      <p id="readout">100%</p>
-      <input id="slider" type="range" min="0" max="1000" value="100" step="1" />
-      <button id="reset" type="button">Reset</button>
+      <header>
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2.5 6v4h2.3L8.5 13V3L4.8 6z" />
+            <path d="M11 5.5a3.5 3.5 0 0 1 0 5" />
+            <path d="M12.8 3.5a6 6 0 0 1 0 9" />
+          </svg>
+        </span>
+        <h1>Volume Master</h1>
+        <span id="badge" class="badge">Native</span>
+      </header>
+
+      <section class="readout-row">
+        <p id="readout">100<span class="unit">%</span></p>
+        <span class="hint">this tab</span>
+      </section>
+
+      <div class="slider-wrap">
+        <input id="slider" type="range" min="0" max="1000" value="100" step="1" aria-label="Volume" />
+        <div class="ticks" aria-hidden="true">
+          <span>0</span>
+          <span>100</span>
+          <span>1000</span>
+        </div>
+      </div>
+
+      <footer>
+        <button id="reset" type="button">Reset to 100%</button>
+      </footer>
+
       <p id="note" hidden>Can't control this page</p>
     </main>
     <script type="module" src="popup.js"></script>
