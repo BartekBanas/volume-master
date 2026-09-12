@@ -1,0 +1,15 @@
+{
+  "name": "volume-master",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Per-tab volume from 0 to 1000 percent.",
+  "scripts": {
+    "build": "tsc && node scripts/copy.mjs",
+    "watch": "tsc --watch",
+    "icons": "node scripts/make-icons.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.11",
+    "typescript": "^5.9.2"
+  }
+}

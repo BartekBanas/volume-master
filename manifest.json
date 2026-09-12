@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Volume Master",
+  "version": "0.1.0",
+  "description": "Per-tab volume from 0 to 1000 percent.",
+  "permissions": ["tabCapture", "offscreen", "activeTab"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Volume Master",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
