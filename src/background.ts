@@ -9,8 +9,13 @@ import {
 
 type TabState = { percent: number; touched: boolean };
 
+type RestorableState =
+  | typeof chrome.windows.WindowState.NORMAL
+  | typeof chrome.windows.WindowState.MAXIMIZED;
+
 const tabs = new Map<number, TabState>();
 const needsRecapture = new Set<number>();
+const promotedWindows = new Map<number, RestorableState>();
 let creatingOffscreen: Promise<void> | null = null;
 
 function view(tabId: number, capturable: boolean): TabStateView {
@@ -208,6 +213,50 @@ chrome.tabs.onActivated.addListener(() => {
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) return;
   void updateBadge();
+});
+
+function restorableState(
+  state: `${chrome.windows.WindowState}` | undefined,
+): RestorableState {
+  return state === chrome.windows.WindowState.MAXIMIZED
+    ? chrome.windows.WindowState.MAXIMIZED
+    : chrome.windows.WindowState.NORMAL;
+}
+
+async function restorePromotedWindow(windowId: number): Promise<void> {
+  const prior = promotedWindows.get(windowId);
+  if (!prior) return;
+  promotedWindows.delete(windowId);
+  await chrome.windows.update(windowId, { state: prior }).catch(() => undefined);
+}
+
+async function syncWindowFullscreen(
+  tabId: number,
+  fullscreen: boolean,
+  status: chrome.tabCapture.CaptureInfo["status"],
+): Promise<void> {
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+  if (!tab?.windowId) return;
+  const { windowId } = tab;
+
+  if (!fullscreen || status === "stopped" || status === "error") {
+    await restorePromotedWindow(windowId);
+    return;
+  }
+
+  if (status !== "active") return;
+
+  const win = await chrome.windows.get(windowId).catch(() => undefined);
+  if (!win || win.state === "fullscreen") return;
+
+  promotedWindows.set(windowId, restorableState(win.state));
+  await chrome.windows
+    .update(windowId, { state: "fullscreen" })
+    .catch(() => undefined);
+}
+
+chrome.tabCapture.onStatusChanged.addListener((info) => {
+  void syncWindowFullscreen(info.tabId, info.fullscreen, info.status);
 });
 
 void updateBadge();
