@@ -4,28 +4,21 @@ import {
   snapPercent,
   type BackgroundRequest,
   type OffscreenRequest,
+  type OffscreenTabState,
   type TabStateView,
 } from "./messages.js";
-
-type TabState = { percent: number; touched: boolean };
 
 type RestorableState =
   | typeof chrome.windows.WindowState.NORMAL
   | typeof chrome.windows.WindowState.MAXIMIZED;
 
-const tabs = new Map<number, TabState>();
 const needsRecapture = new Set<number>();
 const promotedWindows = new Map<number, RestorableState>();
 let creatingOffscreen: Promise<void> | null = null;
+let limiterEnabled = true;
+let meterTabId: number | null = null;
 
-function view(tabId: number, capturable: boolean): TabStateView {
-  const state = tabs.get(tabId);
-  return {
-    percent: state?.percent ?? NATIVE_PERCENT,
-    touched: state?.touched ?? false,
-    capturable,
-  };
-}
+const BADGE_COLOR = "#1c1c24";
 
 async function hasOffscreen(): Promise<boolean> {
   const contexts = await chrome.runtime.getContexts({
@@ -55,16 +48,33 @@ async function ensureOffscreen(): Promise<void> {
   await creatingOffscreen;
 }
 
-async function sendOffscreen(
-  message: OffscreenRequest,
-): Promise<{ ok?: boolean; captured?: boolean; empty?: boolean; error?: string }> {
+async function sendOffscreen(message: OffscreenRequest): Promise<{
+  ok?: boolean;
+  captured?: boolean;
+  percent?: number;
+  empty?: boolean;
+  error?: string;
+}> {
   return chrome.runtime.sendMessage(message);
 }
 
-async function isCaptured(tabId: number): Promise<boolean> {
-  if (!(await hasOffscreen())) return false;
-  const result = await sendOffscreen({ target: "offscreen", type: "hasTab", tabId });
-  return Boolean(result?.captured);
+/** The offscreen document owns the audio graph, so it is the source of truth. */
+async function offscreenState(tabId: number): Promise<OffscreenTabState> {
+  if (!(await hasOffscreen())) return { captured: false, percent: NATIVE_PERCENT };
+  const result = await sendOffscreen({ target: "offscreen", type: "getState", tabId });
+  if (!result?.captured) return { captured: false, percent: NATIVE_PERCENT };
+  return { captured: true, percent: result.percent ?? NATIVE_PERCENT };
+}
+
+async function setBadge(tabId: number, percent: number): Promise<void> {
+  if (percent === NATIVE_PERCENT) {
+    await chrome.action.setBadgeText({ text: "", tabId }).catch(() => undefined);
+    return;
+  }
+  await chrome.action
+    .setBadgeBackgroundColor({ color: BADGE_COLOR, tabId })
+    .catch(() => undefined);
+  await chrome.action.setBadgeText({ text: String(percent), tabId }).catch(() => undefined);
 }
 
 async function detachTab(tabId: number): Promise<void> {
@@ -89,31 +99,20 @@ async function capture(tabId: number, percent: number): Promise<void> {
     tabId,
     streamId,
     percent,
+    limiter: limiterEnabled,
   });
   if (!result?.ok) {
     throw new Error(result?.error ?? "attach failed");
+  }
+  if (meterTabId !== null) {
+    await sendOffscreen({ target: "offscreen", type: "watchMeter", tabId: meterTabId });
   }
 }
 
 async function fallBackNative(tabId: number): Promise<void> {
   await detachTab(tabId).catch(() => undefined);
-  tabs.set(tabId, { percent: NATIVE_PERCENT, touched: true });
   await closeOffscreenIfEmpty();
-}
-
-async function updateBadge(): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!tab?.id) {
-    await chrome.action.setBadgeText({ text: "" });
-    return;
-  }
-  const state = tabs.get(tab.id);
-  if (!state?.touched) {
-    await chrome.action.setBadgeText({ text: "" });
-    return;
-  }
-  await chrome.action.setBadgeBackgroundColor({ color: "#1c1c24" });
-  await chrome.action.setBadgeText({ text: String(state.percent) });
+  await setBadge(tabId, NATIVE_PERCENT);
 }
 
 async function tabCapturable(tabId: number): Promise<boolean> {
@@ -122,32 +121,52 @@ async function tabCapturable(tabId: number): Promise<boolean> {
   return isCapturableUrl(tab.url);
 }
 
+function view(percent: number, capturable: boolean): TabStateView {
+  return { percent, capturable, limiter: limiterEnabled };
+}
+
 async function getState(tabId: number): Promise<TabStateView> {
   const capturable = await tabCapturable(tabId);
   if (!capturable) {
-    return { percent: NATIVE_PERCENT, touched: false, capturable: false };
+    return view(NATIVE_PERCENT, false);
   }
-  return view(tabId, true);
+  const state = await offscreenState(tabId);
+  return view(state.percent, true);
+}
+
+async function watchMeter(tabId: number | null): Promise<void> {
+  meterTabId = tabId;
+  if (await hasOffscreen()) {
+    await sendOffscreen({ target: "offscreen", type: "watchMeter", tabId });
+  }
+}
+
+async function setLimiter(enabled: boolean): Promise<TabStateView> {
+  limiterEnabled = enabled;
+  if (await hasOffscreen()) {
+    await sendOffscreen({ target: "offscreen", type: "setLimiter", enabled });
+  }
+  return view(NATIVE_PERCENT, true);
 }
 
 async function setGain(tabId: number, percent: number): Promise<TabStateView> {
   const capturable = await tabCapturable(tabId);
   if (!capturable) {
-    return { percent: NATIVE_PERCENT, touched: false, capturable: false };
+    return view(NATIVE_PERCENT, false);
   }
 
   const snapped = snapPercent(percent);
 
   if (snapped === NATIVE_PERCENT) {
     await detachTab(tabId);
-    tabs.set(tabId, { percent: NATIVE_PERCENT, touched: true });
     await closeOffscreenIfEmpty();
-    await updateBadge();
-    return view(tabId, true);
+    await setBadge(tabId, NATIVE_PERCENT);
+    return view(NATIVE_PERCENT, true);
   }
 
   try {
-    if (await isCaptured(tabId)) {
+    const current = await offscreenState(tabId);
+    if (current.captured) {
       const result = await sendOffscreen({
         target: "offscreen",
         type: "setGain",
@@ -158,24 +177,23 @@ async function setGain(tabId: number, percent: number): Promise<TabStateView> {
     } else {
       await capture(tabId, snapped);
     }
-    tabs.set(tabId, { percent: snapped, touched: true });
+    await setBadge(tabId, snapped);
+    return view(snapped, true);
   } catch {
     await fallBackNative(tabId);
+    return view(NATIVE_PERCENT, true);
   }
-
-  await updateBadge();
-  return view(tabId, true);
 }
 
 async function recapture(tabId: number): Promise<void> {
-  const state = tabs.get(tabId);
-  if (!state || state.percent === NATIVE_PERCENT) return;
+  const state = await offscreenState(tabId);
+  if (!state.captured) return;
   try {
     await detachTab(tabId);
     await capture(tabId, state.percent);
+    await setBadge(tabId, state.percent);
   } catch {
     await fallBackNative(tabId);
-    await updateBadge();
   }
 }
 
@@ -184,18 +202,22 @@ chrome.runtime.onMessage.addListener((message: BackgroundRequest, _sender, sendR
   const task =
     message.type === "getState"
       ? getState(message.tabId)
-      : setGain(message.tabId, message.percent);
+      : message.type === "setLimiter"
+        ? setLimiter(message.enabled)
+        : message.type === "watchMeter"
+          ? watchMeter(message.tabId)
+          : message.type === "unwatchMeter"
+            ? watchMeter(null)
+            : setGain(message.tabId, message.percent);
   void task.then(sendResponse);
   return true;
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  tabs.delete(tabId);
   needsRecapture.delete(tabId);
   void (async () => {
     await detachTab(tabId);
     await closeOffscreenIfEmpty();
-    await updateBadge();
   })();
 });
 
@@ -204,15 +226,6 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status !== "complete" || !needsRecapture.has(tabId)) return;
   needsRecapture.delete(tabId);
   void recapture(tabId);
-});
-
-chrome.tabs.onActivated.addListener(() => {
-  void updateBadge();
-});
-
-chrome.windows.onFocusChanged.addListener((windowId) => {
-  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
-  void updateBadge();
 });
 
 function restorableState(
@@ -258,5 +271,3 @@ async function syncWindowFullscreen(
 chrome.tabCapture.onStatusChanged.addListener((info) => {
   void syncWindowFullscreen(info.tabId, info.fullscreen, info.status);
 });
-
-void updateBadge();
