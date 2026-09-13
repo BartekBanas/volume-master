@@ -92,3 +92,21 @@ export function positionFromPercent(percent: number): number {
   const p = snapPercent(percent) / MAX_PERCENT;
   return Math.round(MAX_PERCENT * p ** (1 / SLIDER_GAMMA));
 }
+
+export type VolumeUnit = "percent" | "db";
+
+/** Amplitude dB from percent. 100% is 0 dB, 1000% is +20 dB, 0% is −∞. */
+export function dbFromPercent(percent: number): number {
+  const p = snapPercent(percent);
+  if (p <= 0) return Number.NEGATIVE_INFINITY;
+  return 20 * Math.log10(p / NATIVE_PERCENT);
+}
+
+export function formatDb(percent: number): string {
+  const db = dbFromPercent(percent);
+  if (!Number.isFinite(db)) return "−∞";
+  const rounded = Math.round(db * 10) / 10;
+  if (Object.is(rounded, -0) || rounded === 0) return "0.0";
+  const abs = Math.abs(rounded).toFixed(1);
+  return `${rounded > 0 ? "+" : "−"}${abs}`;
+}
