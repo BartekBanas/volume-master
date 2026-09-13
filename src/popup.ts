@@ -141,7 +141,7 @@ reset.addEventListener("click", () => {
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 tabId = tab?.id;
 if (tabId === undefined || !isCapturableUrl(tab?.url)) {
-  paint({ percent: NATIVE_PERCENT, touched: false, capturable: false });
+  paint({ percent: NATIVE_PERCENT, capturable: false });
 } else {
   paint(await send({ target: "background", type: "getState", tabId }));
 }

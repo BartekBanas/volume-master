@@ -7,9 +7,10 @@ export type BackgroundRequest =
 
 export type TabStateView = {
   percent: number;
-  touched: boolean;
   capturable: boolean;
 };
+
+export type OffscreenTabState = { captured: boolean; percent: number };
 
 export type OffscreenRequest =
   | {
@@ -21,7 +22,7 @@ export type OffscreenRequest =
     }
   | { target: "offscreen"; type: "setGain"; tabId: number; percent: number }
   | { target: "offscreen"; type: "detach"; tabId: number }
-  | { target: "offscreen"; type: "hasTab"; tabId: number }
+  | { target: "offscreen"; type: "getState"; tabId: number }
   | { target: "offscreen"; type: "isEmpty" };
 
 const BLOCKED_PROTOCOLS = new Set([
