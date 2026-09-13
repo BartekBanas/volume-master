@@ -4,12 +4,15 @@
   "version": "0.1.0",
   "description": "Per-tab volume from 0 to 1000 percent.",
   "scripts": {
-    "build": "tsc && node scripts/copy.mjs",
+    "build": "tsc && tsx scripts/copy.ts",
+    "package": "npm run build && tsx scripts/package.ts",
     "watch": "tsc --watch",
     "icons": "python scripts/process-glass-icon.py"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.11",
+    "@types/node": "^24.3.1",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
 }
