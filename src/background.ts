@@ -65,6 +65,10 @@ async function offscreenState(tabId: number): Promise<OffscreenTabState> {
 }
 
 async function setBadge(tabId: number, percent: number): Promise<void> {
+  if (percent === NATIVE_PERCENT) {
+    await chrome.action.setBadgeText({ text: "", tabId }).catch(() => undefined);
+    return;
+  }
   await chrome.action
     .setBadgeBackgroundColor({ color: BADGE_COLOR, tabId })
     .catch(() => undefined);
