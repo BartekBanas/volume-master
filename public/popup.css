@@ -71,15 +71,11 @@ header {
 }
 
 .mark {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 24px;
   height: 24px;
-  border-radius: 8px;
-  color: var(--text);
-  background: linear-gradient(135deg, var(--fill-a), var(--fill-b));
-  box-shadow: 0 4px 14px -4px var(--fill-a);
-  transition: background var(--tint), box-shadow var(--tint);
+  object-fit: contain;
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--fill-a) 45%, transparent));
 }
 
 h1 {

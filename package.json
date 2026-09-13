@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc && node scripts/copy.mjs",
     "watch": "tsc --watch",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "python scripts/process-glass-icon.py"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.11",
