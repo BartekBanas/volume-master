@@ -15,6 +15,7 @@ type RestorableState =
 const needsRecapture = new Set<number>();
 const promotedWindows = new Map<number, RestorableState>();
 let creatingOffscreen: Promise<void> | null = null;
+let limiterEnabled = true;
 
 const BADGE_COLOR = "#1c1c24";
 
@@ -97,6 +98,7 @@ async function capture(tabId: number, percent: number): Promise<void> {
     tabId,
     streamId,
     percent,
+    limiter: limiterEnabled,
   });
   if (!result?.ok) {
     throw new Error(result?.error ?? "attach failed");
@@ -115,19 +117,31 @@ async function tabCapturable(tabId: number): Promise<boolean> {
   return isCapturableUrl(tab.url);
 }
 
+function view(percent: number, capturable: boolean): TabStateView {
+  return { percent, capturable, limiter: limiterEnabled };
+}
+
 async function getState(tabId: number): Promise<TabStateView> {
   const capturable = await tabCapturable(tabId);
   if (!capturable) {
-    return { percent: NATIVE_PERCENT, capturable: false };
+    return view(NATIVE_PERCENT, false);
   }
   const state = await offscreenState(tabId);
-  return { percent: state.percent, capturable: true };
+  return view(state.percent, true);
+}
+
+async function setLimiter(enabled: boolean): Promise<TabStateView> {
+  limiterEnabled = enabled;
+  if (await hasOffscreen()) {
+    await sendOffscreen({ target: "offscreen", type: "setLimiter", enabled });
+  }
+  return view(NATIVE_PERCENT, true);
 }
 
 async function setGain(tabId: number, percent: number): Promise<TabStateView> {
   const capturable = await tabCapturable(tabId);
   if (!capturable) {
-    return { percent: NATIVE_PERCENT, capturable: false };
+    return view(NATIVE_PERCENT, false);
   }
 
   const snapped = snapPercent(percent);
@@ -136,7 +150,7 @@ async function setGain(tabId: number, percent: number): Promise<TabStateView> {
     await detachTab(tabId);
     await closeOffscreenIfEmpty();
     await setBadge(tabId, NATIVE_PERCENT);
-    return { percent: NATIVE_PERCENT, capturable: true };
+    return view(NATIVE_PERCENT, true);
   }
 
   try {
@@ -153,10 +167,10 @@ async function setGain(tabId: number, percent: number): Promise<TabStateView> {
       await capture(tabId, snapped);
     }
     await setBadge(tabId, snapped);
-    return { percent: snapped, capturable: true };
+    return view(snapped, true);
   } catch {
     await fallBackNative(tabId);
-    return { percent: NATIVE_PERCENT, capturable: true };
+    return view(NATIVE_PERCENT, true);
   }
 }
 
@@ -177,7 +191,9 @@ chrome.runtime.onMessage.addListener((message: BackgroundRequest, _sender, sendR
   const task =
     message.type === "getState"
       ? getState(message.tabId)
-      : setGain(message.tabId, message.percent);
+      : message.type === "setLimiter"
+        ? setLimiter(message.enabled)
+        : setGain(message.tabId, message.percent);
   void task.then(sendResponse);
   return true;
 });

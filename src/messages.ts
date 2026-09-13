@@ -3,11 +3,13 @@ export const NATIVE_PERCENT = 100;
 
 export type BackgroundRequest =
   | { target: "background"; type: "getState"; tabId: number }
-  | { target: "background"; type: "setGain"; tabId: number; percent: number };
+  | { target: "background"; type: "setGain"; tabId: number; percent: number }
+  | { target: "background"; type: "setLimiter"; enabled: boolean };
 
 export type TabStateView = {
   percent: number;
   capturable: boolean;
+  limiter: boolean;
 };
 
 export type OffscreenTabState = { captured: boolean; percent: number };
@@ -19,8 +21,10 @@ export type OffscreenRequest =
       tabId: number;
       streamId: string;
       percent: number;
+      limiter: boolean;
     }
   | { target: "offscreen"; type: "setGain"; tabId: number; percent: number }
+  | { target: "offscreen"; type: "setLimiter"; enabled: boolean }
   | { target: "offscreen"; type: "detach"; tabId: number }
   | { target: "offscreen"; type: "getState"; tabId: number }
   | { target: "offscreen"; type: "isEmpty" };

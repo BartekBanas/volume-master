@@ -12,6 +12,7 @@ const slider = document.querySelector("#slider") as HTMLInputElement;
 const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
 const readout = document.querySelector("#readout") as HTMLParagraphElement;
 const reset = document.querySelector("#reset") as HTMLButtonElement;
+const limiter = document.querySelector("#limiter") as HTMLInputElement;
 const note = document.querySelector("#note") as HTMLParagraphElement;
 const badge = document.querySelector("#badge") as HTMLSpanElement;
 const panel = document.querySelector("main") as HTMLElement;
@@ -96,6 +97,8 @@ function paint(state: TabStateView, syncSlider = true): void {
   panel.classList.toggle("off", !state.capturable);
   slider.disabled = !state.capturable;
   reset.disabled = !state.capturable;
+  limiter.disabled = !state.capturable;
+  limiter.checked = state.limiter;
   note.hidden = state.capturable;
 }
 
@@ -138,10 +141,20 @@ reset.addEventListener("click", () => {
   void apply(NATIVE_PERCENT, true);
 });
 
+limiter.addEventListener("change", () => {
+  void send({
+    target: "background",
+    type: "setLimiter",
+    enabled: limiter.checked,
+  }).then((state) => {
+    limiter.checked = state.limiter;
+  });
+});
+
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 tabId = tab?.id;
 if (tabId === undefined || !isCapturableUrl(tab?.url)) {
-  paint({ percent: NATIVE_PERCENT, capturable: false });
+  paint({ percent: NATIVE_PERCENT, capturable: false, limiter: true });
 } else {
   paint(await send({ target: "background", type: "getState", tabId }));
 }
