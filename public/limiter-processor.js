@@ -1,6 +1,7 @@
 const THRESHOLD = 0.99;
 const LOOKAHEAD_SEC = 0.005;
 const RELEASE_SEC = 0.05;
+const METER_BLOCKS = 16;
 
 class PeakLimiterProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -22,6 +23,8 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
     this.envelope = 0;
     this.buffers = [];
     this.releaseCoeff = Math.exp(-1 / (RELEASE_SEC * sampleRate));
+    this.peakReduction = 0;
+    this.meterBlocks = 0;
   }
 
   ensureBuffers(channels) {
@@ -68,6 +71,8 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
       let gain = 1;
       if (!bypass && this.envelope > threshold) {
         gain = threshold / this.envelope;
+        const reduction = 1 - gain;
+        if (reduction > this.peakReduction) this.peakReduction = reduction;
       }
 
       const idx = this.writeIndex;
@@ -87,6 +92,13 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
       }
 
       this.writeIndex = idx + 1 === delay ? 0 : idx + 1;
+    }
+
+    this.meterBlocks += 1;
+    if (this.meterBlocks >= METER_BLOCKS) {
+      this.port.postMessage(this.peakReduction);
+      this.peakReduction = 0;
+      this.meterBlocks = 0;
     }
 
     return true;

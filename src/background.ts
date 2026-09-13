@@ -16,6 +16,7 @@ const needsRecapture = new Set<number>();
 const promotedWindows = new Map<number, RestorableState>();
 let creatingOffscreen: Promise<void> | null = null;
 let limiterEnabled = true;
+let meterTabId: number | null = null;
 
 const BADGE_COLOR = "#1c1c24";
 
@@ -103,6 +104,9 @@ async function capture(tabId: number, percent: number): Promise<void> {
   if (!result?.ok) {
     throw new Error(result?.error ?? "attach failed");
   }
+  if (meterTabId !== null) {
+    await sendOffscreen({ target: "offscreen", type: "watchMeter", tabId: meterTabId });
+  }
 }
 
 async function fallBackNative(tabId: number): Promise<void> {
@@ -128,6 +132,13 @@ async function getState(tabId: number): Promise<TabStateView> {
   }
   const state = await offscreenState(tabId);
   return view(state.percent, true);
+}
+
+async function watchMeter(tabId: number | null): Promise<void> {
+  meterTabId = tabId;
+  if (await hasOffscreen()) {
+    await sendOffscreen({ target: "offscreen", type: "watchMeter", tabId });
+  }
 }
 
 async function setLimiter(enabled: boolean): Promise<TabStateView> {
@@ -193,7 +204,11 @@ chrome.runtime.onMessage.addListener((message: BackgroundRequest, _sender, sendR
       ? getState(message.tabId)
       : message.type === "setLimiter"
         ? setLimiter(message.enabled)
-        : setGain(message.tabId, message.percent);
+        : message.type === "watchMeter"
+          ? watchMeter(message.tabId)
+          : message.type === "unwatchMeter"
+            ? watchMeter(null)
+            : setGain(message.tabId, message.percent);
   void task.then(sendResponse);
   return true;
 });

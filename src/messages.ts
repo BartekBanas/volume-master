@@ -4,7 +4,16 @@ export const NATIVE_PERCENT = 100;
 export type BackgroundRequest =
   | { target: "background"; type: "getState"; tabId: number }
   | { target: "background"; type: "setGain"; tabId: number; percent: number }
-  | { target: "background"; type: "setLimiter"; enabled: boolean };
+  | { target: "background"; type: "setLimiter"; enabled: boolean }
+  | { target: "background"; type: "watchMeter"; tabId: number }
+  | { target: "background"; type: "unwatchMeter" };
+
+export type PopupEvent = {
+  target: "popup";
+  type: "limiterMeter";
+  tabId: number;
+  reduction: number;
+};
 
 export type TabStateView = {
   percent: number;
@@ -27,7 +36,8 @@ export type OffscreenRequest =
   | { target: "offscreen"; type: "setLimiter"; enabled: boolean }
   | { target: "offscreen"; type: "detach"; tabId: number }
   | { target: "offscreen"; type: "getState"; tabId: number }
-  | { target: "offscreen"; type: "isEmpty" };
+  | { target: "offscreen"; type: "isEmpty" }
+  | { target: "offscreen"; type: "watchMeter"; tabId: number | null };
 
 const BLOCKED_PROTOCOLS = new Set([
   "chrome:",

@@ -1,4 +1,4 @@
-import type { OffscreenRequest } from "./messages.js";
+import type { OffscreenRequest, PopupEvent } from "./messages.js";
 import { NATIVE_PERCENT } from "./messages.js";
 
 type Graph = {
@@ -13,6 +13,7 @@ const ctx = new AudioContext();
 const graphs = new Map<number, Graph>();
 
 let workletReady: Promise<boolean> | null = null;
+let meterTabId: number | null = null;
 
 function percentToGain(percent: number): number {
   return percent / 100;
@@ -39,8 +40,8 @@ async function ensureWorklet(): Promise<boolean> {
   return workletReady;
 }
 
-function createLimiter(): AudioWorkletNode {
-  return new AudioWorkletNode(ctx, "peak-limiter", {
+function createLimiter(tabId: number): AudioWorkletNode {
+  const node = new AudioWorkletNode(ctx, "peak-limiter", {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
@@ -48,6 +49,19 @@ function createLimiter(): AudioWorkletNode {
     channelCountMode: "explicit",
     channelInterpretation: "speakers",
   });
+  node.port.onmessage = (event: MessageEvent<number>) => {
+    if (meterTabId !== tabId) return;
+    const reduction = event.data;
+    if (typeof reduction !== "number" || reduction < 0.003) return;
+    const message: PopupEvent = {
+      target: "popup",
+      type: "limiterMeter",
+      tabId,
+      reduction,
+    };
+    void chrome.runtime.sendMessage(message).catch(() => undefined);
+  };
+  return node;
 }
 
 async function detach(tabId: number): Promise<void> {
@@ -89,7 +103,7 @@ async function attach(
   let limiter: AudioWorkletNode | null = null;
   if (workletOk) {
     try {
-      limiter = createLimiter();
+      limiter = createLimiter(tabId);
       setBypass(limiter, limiterEnabled);
     } catch {
       limiter = null;
@@ -143,6 +157,9 @@ async function handle(message: OffscreenRequest): Promise<unknown> {
       return { ok: true, ...getState(message.tabId) };
     case "isEmpty":
       return { ok: true, empty: graphs.size === 0 };
+    case "watchMeter":
+      meterTabId = message.tabId;
+      return { ok: true };
   }
 }
 

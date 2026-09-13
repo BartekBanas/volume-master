@@ -5,6 +5,7 @@ import {
   percentFromPosition,
   positionFromPercent,
   type BackgroundRequest,
+  type PopupEvent,
   type TabStateView,
 } from "./messages.js";
 
@@ -13,6 +14,7 @@ const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
 const readout = document.querySelector("#readout") as HTMLParagraphElement;
 const reset = document.querySelector("#reset") as HTMLButtonElement;
 const limiter = document.querySelector("#limiter") as HTMLInputElement;
+const limiterChip = document.querySelector(".limiter") as HTMLElement;
 const note = document.querySelector("#note") as HTMLParagraphElement;
 const badge = document.querySelector("#badge") as HTMLSpanElement;
 const panel = document.querySelector("main") as HTMLElement;
@@ -100,6 +102,7 @@ function paint(state: TabStateView, syncSlider = true): void {
   limiter.disabled = !state.capturable;
   limiter.checked = state.limiter;
   note.hidden = state.capturable;
+  if (!state.capturable || !state.limiter) setClip(0);
 }
 
 async function send(request: BackgroundRequest): Promise<TabStateView> {
@@ -142,13 +145,60 @@ reset.addEventListener("click", () => {
 });
 
 limiter.addEventListener("change", () => {
+  if (!limiter.checked) setClip(0);
   void send({
     target: "background",
     type: "setLimiter",
     enabled: limiter.checked,
   }).then((state) => {
     limiter.checked = state.limiter;
+    if (!state.limiter) setClip(0);
   });
+});
+
+const motionOk = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+let clipShown = 0;
+let clipPeak = 0;
+let clipRaf = 0;
+
+function setClip(value: number): void {
+  if (value <= 0) {
+    clipShown = 0;
+    clipPeak = 0;
+    if (clipRaf) {
+      cancelAnimationFrame(clipRaf);
+      clipRaf = 0;
+    }
+  }
+  limiterChip.style.setProperty("--clip", value.toFixed(3));
+}
+
+function tickClip(): void {
+  if (clipPeak > clipShown) clipShown = clipPeak;
+  else clipShown *= 0.82;
+  clipPeak *= 0.7;
+  if (clipShown < 0.008 && clipPeak < 0.008) {
+    clipShown = 0;
+    clipPeak = 0;
+    clipRaf = 0;
+    setClip(0);
+    return;
+  }
+  setClip(clipShown);
+  clipRaf = requestAnimationFrame(tickClip);
+}
+
+function bumpClip(reduction: number): void {
+  if (!motionOk || !limiter.checked) return;
+  const visual = Math.sqrt(Math.min(1, Math.max(0, reduction)));
+  clipPeak = Math.max(clipPeak, visual);
+  if (!clipRaf) clipRaf = requestAnimationFrame(tickClip);
+}
+
+chrome.runtime.onMessage.addListener((message: PopupEvent) => {
+  if (message?.target !== "popup" || message.type !== "limiterMeter") return;
+  if (message.tabId !== tabId) return;
+  bumpClip(message.reduction);
 });
 
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -157,4 +207,15 @@ if (tabId === undefined || !isCapturableUrl(tab?.url)) {
   paint({ percent: NATIVE_PERCENT, capturable: false, limiter: true });
 } else {
   paint(await send({ target: "background", type: "getState", tabId }));
+  void chrome.runtime.sendMessage({
+    target: "background",
+    type: "watchMeter",
+    tabId,
+  }).catch(() => undefined);
 }
+
+window.addEventListener("pagehide", () => {
+  void chrome.runtime.sendMessage({ target: "background", type: "unwatchMeter" }).catch(
+    () => undefined,
+  );
+});

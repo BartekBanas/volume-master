@@ -50,7 +50,7 @@ main {
     radial-gradient(120% 80% at 0% 0%, var(--glow-a), transparent 55%),
     radial-gradient(100% 70% at 100% 100%, var(--glow-b), transparent 60%),
     var(--panel);
-  overflow: hidden;
+  overflow: visible;
   transition: background var(--tint);
 }
 
@@ -253,6 +253,7 @@ footer {
 }
 
 .limiter {
+  --clip: 0;
   position: relative;
   display: flex;
   align-items: center;
@@ -268,6 +269,7 @@ footer {
   border: 1px solid var(--panel-edge);
   cursor: pointer;
   user-select: none;
+  transform-origin: center;
   transition: color var(--tint), background var(--tint), border-color var(--tint);
 }
 
@@ -289,8 +291,12 @@ footer {
 
 .limiter:has(input:checked) {
   color: color-mix(in srgb, var(--fill-a) 45%, var(--text));
-  background: color-mix(in srgb, var(--fill-a) 10%, transparent);
-  border-color: color-mix(in srgb, var(--fill-a) 28%, transparent);
+  background: color-mix(in srgb, var(--fill-a) calc(10% + var(--clip) * 28%), transparent);
+  border-color: color-mix(in srgb, var(--fill-a) calc(28% + var(--clip) * 45%), transparent);
+  transform: scale(calc(1 + var(--clip) * 0.09)) translateY(calc(var(--clip) * -1.5px));
+  box-shadow:
+    0 0 calc(var(--clip) * 22px) color-mix(in srgb, var(--fill-a) calc(var(--clip) * 80%), transparent),
+    inset 0 0 calc(var(--clip) * 10px) color-mix(in srgb, var(--fill-a) calc(var(--clip) * 30%), transparent);
 }
 
 .limiter:hover:not(:has(input:disabled)) {
@@ -298,7 +304,7 @@ footer {
 }
 
 .limiter:hover:has(input:checked) {
-  background: color-mix(in srgb, var(--fill-a) 16%, transparent);
+  background: color-mix(in srgb, var(--fill-a) calc(16% + var(--clip) * 28%), transparent);
 }
 
 .limiter:has(input:focus-visible) {
@@ -338,7 +344,7 @@ footer {
   background: linear-gradient(90deg, var(--fill-a), var(--fill-b));
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--fill-a) 40%, transparent),
-    0 0 calc(8px + var(--heat) * 8px) -2px var(--fill-a);
+    0 0 calc(8px + var(--heat) * 8px + var(--clip) * 10px) -2px var(--fill-a);
 }
 
 .limiter:has(input:checked) .knob {
@@ -401,5 +407,9 @@ input:disabled {
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+
+  .limiter:has(input:checked) {
+    transform: none;
   }
 }
