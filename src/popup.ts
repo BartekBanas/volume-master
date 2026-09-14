@@ -1,4 +1,5 @@
 import {
+  formatDb,
   isCapturableUrl,
   MAX_PERCENT,
   NATIVE_PERCENT,
@@ -7,7 +8,10 @@ import {
   type BackgroundRequest,
   type PopupEvent,
   type TabStateView,
+  type VolumeUnit,
 } from "./messages.js";
+
+const UNIT_KEY = "volume-master.unit";
 
 const slider = document.querySelector("#slider") as HTMLInputElement;
 const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
@@ -18,6 +22,12 @@ const limiterChip = document.querySelector(".limiter") as HTMLElement;
 const note = document.querySelector("#note") as HTMLParagraphElement;
 const badge = document.querySelector("#badge") as HTMLSpanElement;
 const panel = document.querySelector("main") as HTMLElement;
+const unitSwitch = document.querySelector(".unit-switch") as HTMLElement;
+const unitPercent = document.querySelector("#unit-percent") as HTMLButtonElement;
+const unitDb = document.querySelector("#unit-db") as HTMLButtonElement;
+const tickMin = document.querySelector("#tick-min") as HTMLSpanElement;
+const tickNative = document.querySelector("#tick-native") as HTMLSpanElement;
+const tickMax = document.querySelector("#tick-max") as HTMLSpanElement;
 
 let tabId: number | undefined;
 
@@ -91,9 +101,36 @@ function setSliderPosition(position: number): void {
   slider.style.setProperty("--ratio", String(positionRatio(position)));
 }
 
+function readUnit(): VolumeUnit {
+  return localStorage.getItem(UNIT_KEY) === "db" ? "db" : "percent";
+}
+
+let unit: VolumeUnit = readUnit();
+
+function setUnit(next: VolumeUnit): void {
+  unit = next;
+  localStorage.setItem(UNIT_KEY, next);
+  unitSwitch.dataset.unit = next;
+  unitPercent.setAttribute("aria-pressed", String(next === "percent"));
+  unitDb.setAttribute("aria-pressed", String(next === "db"));
+  tickMin.textContent = next === "db" ? "−∞" : "0";
+  tickNative.textContent = next === "db" ? "0" : "100";
+  tickMax.textContent = next === "db" ? "+20" : "1000";
+  reset.textContent = next === "db" ? "Reset to 0 dB" : "Reset to 100%";
+  slider.setAttribute("aria-label", next === "db" ? "Volume in decibels" : "Volume");
+}
+
+function paintReadout(percent: number): void {
+  if (unit === "db") {
+    readout.innerHTML = `${formatDb(percent)}<span class="unit">dB</span>`;
+    return;
+  }
+  readout.innerHTML = `${percent}<span class="unit">%</span>`;
+}
+
 function paint(state: TabStateView, syncSlider = true): void {
   if (syncSlider) setSliderPosition(positionFromPercent(state.percent));
-  readout.innerHTML = `${state.percent}<span class="unit">%</span>`;
+  paintReadout(state.percent);
   badge.textContent = badgeLabel(state.percent, state.capturable);
   paintTheme(state.capturable ? state.percent : NATIVE_PERCENT);
   panel.classList.toggle("off", !state.capturable);
@@ -143,6 +180,20 @@ slider.addEventListener("input", () => {
 reset.addEventListener("click", () => {
   void apply(NATIVE_PERCENT, true);
 });
+
+unitPercent.addEventListener("click", () => {
+  setUnit("percent");
+  paintReadout(snapFromSlider());
+});
+
+unitDb.addEventListener("click", () => {
+  setUnit("db");
+  paintReadout(snapFromSlider());
+});
+
+function snapFromSlider(): number {
+  return percentFromPosition(Number(slider.value));
+}
 
 limiter.addEventListener("change", () => {
   if (!limiter.checked) setClip(0);
@@ -194,6 +245,9 @@ function bumpClip(reduction: number): void {
   clipPeak = Math.max(clipPeak, visual);
   if (!clipRaf) clipRaf = requestAnimationFrame(tickClip);
 }
+
+setUnit(unit);
+requestAnimationFrame(() => unitSwitch.classList.add("ready"));
 
 chrome.runtime.onMessage.addListener((message: PopupEvent) => {
   if (message?.target !== "popup" || message.type !== "limiterMeter") return;

@@ -13,7 +13,17 @@ type RestorableState =
   | typeof chrome.windows.WindowState.MAXIMIZED;
 
 const needsRecapture = new Set<number>();
-const promotedWindows = new Map<number, RestorableState>();
+/**
+ * Windows we promoted to F11-style fullscreen, keyed by window id, with the
+ * state to restore. Lives in chrome.storage.session (memory only, cleared when
+ * the browser closes) because the service worker is shut down after ~30s of
+ * idle time and an in-memory map would be lost mid-fullscreen. Losing it meant
+ * the window stayed in F11 after the site exited fullscreen.
+ */
+const PROMOTED_WINDOWS_KEY = "promotedWindows";
+type PromotedWindows = Record<string, RestorableState>;
+/** Bumped per window whenever we promote it, so a stale restore loop stops. */
+const promotionGeneration = new Map<number, number>();
 let creatingOffscreen: Promise<void> | null = null;
 let limiterEnabled = true;
 let meterTabId: number | null = null;
@@ -236,11 +246,77 @@ function restorableState(
     : chrome.windows.WindowState.NORMAL;
 }
 
+async function readPromotedWindows(): Promise<PromotedWindows> {
+  const stored = await chrome.storage.session
+    .get(PROMOTED_WINDOWS_KEY)
+    .catch(() => ({}) as Record<string, unknown>);
+  const value = stored[PROMOTED_WINDOWS_KEY];
+  return value && typeof value === "object" ? (value as PromotedWindows) : {};
+}
+
+async function writePromotedWindows(promoted: PromotedWindows): Promise<void> {
+  await chrome.storage.session
+    .set({ [PROMOTED_WINDOWS_KEY]: promoted })
+    .catch(() => undefined);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function bumpGeneration(windowId: number): number {
+  const next = (promotionGeneration.get(windowId) ?? 0) + 1;
+  promotionGeneration.set(windowId, next);
+  return next;
+}
+
+/**
+ * Leave F11 fullscreen. Chromium is still finishing the tab-fullscreen exit
+ * when onStatusChanged fires, and a single windows.update issued during that
+ * transition is sometimes dropped, so verify and retry a few times. Abort if
+ * the window was promoted again in the meantime.
+ */
+async function leaveWindowFullscreen(
+  windowId: number,
+  prior: RestorableState,
+  generation: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (promotionGeneration.get(windowId) !== generation) return;
+    await chrome.windows.update(windowId, { state: prior }).catch(() => undefined);
+    await sleep(100 + attempt * 150);
+    const win = await chrome.windows.get(windowId).catch(() => undefined);
+    if (!win || win.state !== "fullscreen") return;
+  }
+}
+
 async function restorePromotedWindow(windowId: number): Promise<void> {
-  const prior = promotedWindows.get(windowId);
+  const promoted = await readPromotedWindows();
+  const prior = promoted[String(windowId)];
   if (!prior) return;
-  promotedWindows.delete(windowId);
-  await chrome.windows.update(windowId, { state: prior }).catch(() => undefined);
+  delete promoted[String(windowId)];
+  await writePromotedWindows(promoted);
+  await leaveWindowFullscreen(windowId, prior, bumpGeneration(windowId));
+}
+
+async function promoteWindow(windowId: number): Promise<void> {
+  const win = await chrome.windows.get(windowId).catch(() => undefined);
+  if (!win) return;
+  const promoted = await readPromotedWindows();
+  const key = String(windowId);
+  if (win.state === "fullscreen") {
+    // Either already promoted by us (record exists, keep it) or the user
+    // pressed F11 themselves (no record, leave their window alone).
+    return;
+  }
+  if (!promoted[key]) {
+    promoted[key] = restorableState(win.state);
+    await writePromotedWindows(promoted);
+  }
+  bumpGeneration(windowId);
+  await chrome.windows
+    .update(windowId, { state: "fullscreen" })
+    .catch(() => undefined);
 }
 
 async function syncWindowFullscreen(
@@ -258,16 +334,19 @@ async function syncWindowFullscreen(
   }
 
   if (status !== "active") return;
-
-  const win = await chrome.windows.get(windowId).catch(() => undefined);
-  if (!win || win.state === "fullscreen") return;
-
-  promotedWindows.set(windowId, restorableState(win.state));
-  await chrome.windows
-    .update(windowId, { state: "fullscreen" })
-    .catch(() => undefined);
+  await promoteWindow(windowId);
 }
 
 chrome.tabCapture.onStatusChanged.addListener((info) => {
   void syncWindowFullscreen(info.tabId, info.fullscreen, info.status);
+});
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  promotionGeneration.delete(windowId);
+  void (async () => {
+    const promoted = await readPromotedWindows();
+    if (!promoted[String(windowId)]) return;
+    delete promoted[String(windowId)];
+    await writePromotedWindows(promoted);
+  })();
 });
