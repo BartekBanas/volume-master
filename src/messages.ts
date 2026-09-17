@@ -1,5 +1,7 @@
-export const MAX_PERCENT = 1000;
+export const MAX_PERCENT = 2000;
 export const NATIVE_PERCENT = 100;
+/** Linear slider position for native (100%) volume; 1/3 of the track. */
+export const NATIVE_POSITION_RATIO = 1 / 3;
 
 export type BackgroundRequest =
   | { target: "background"; type: "getState"; tabId: number }
@@ -70,7 +72,8 @@ export function isCapturableUrl(url: string | undefined): boolean {
   return true;
 }
 
-export const SLIDER_GAMMA = 2;
+export const SLIDER_GAMMA =
+  Math.log(NATIVE_PERCENT / MAX_PERCENT) / Math.log(NATIVE_POSITION_RATIO);
 
 export function clampPercent(raw: number): number {
   if (!Number.isFinite(raw)) return NATIVE_PERCENT;
@@ -95,7 +98,7 @@ export function positionFromPercent(percent: number): number {
 
 export type VolumeUnit = "percent" | "db";
 
-/** Amplitude dB from percent. 100% is 0 dB, 1000% is +20 dB, 0% is −∞. */
+/** Amplitude dB from percent. 100% is 0 dB, 2000% is +26 dB, 0% is −∞. */
 export function dbFromPercent(percent: number): number {
   const p = snapPercent(percent);
   if (p <= 0) return Number.NEGATIVE_INFINITY;

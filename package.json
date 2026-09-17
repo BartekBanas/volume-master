@@ -2,7 +2,7 @@
   "name": "volume-master",
   "private": true,
   "version": "0.2.0",
-  "description": "Adjust volume up to 1000% with built in limiter.",
+  "description": "Adjust volume up to 2000% with built in limiter.",
   "scripts": {
     "build": "tsc && tsx scripts/copy.ts",
     "package": "npm run build && tsx scripts/package.ts",

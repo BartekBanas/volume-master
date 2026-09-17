@@ -219,7 +219,7 @@ main.off .badge {
   --track-h: 14px;
   --thumb: 32px;
   /* Linear position ratio for the 100% mark; set from popup.ts. */
-  --native-ratio: 0.316;
+  --native-ratio: 0.333;
 
   display: grid;
   gap: 10px;
@@ -230,7 +230,7 @@ main.off .badge {
 }
 
 input[type="range"] {
-  --ratio: 0.316;
+  --ratio: 0.333;
   appearance: none;
   -webkit-appearance: none;
   width: 100%;
