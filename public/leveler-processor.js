@@ -85,11 +85,16 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
     const intensity = parameters.intensity[0] ?? 0.5;
 
     let nextGain = this.gain;
-    if (rms >= NOISE_FLOOR) {
+    if (intensity <= 0) {
+      nextGain = 1;
+    } else if (target <= 0) {
+      // A 0% target means mute; the MIN_GAIN floor below would leave it audible.
+      nextGain = 0;
+    } else if (rms >= NOISE_FLOOR) {
       let desired = target / rms;
       if (desired > MAX_GAIN) desired = MAX_GAIN;
       else if (desired < MIN_GAIN) desired = MIN_GAIN;
-      nextGain = intensity <= 0 ? 1 : Math.pow(desired, intensity);
+      nextGain = Math.pow(desired, intensity);
     }
 
     const start = this.gain;
