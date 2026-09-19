@@ -276,6 +276,19 @@ main.off .badge {
   transform: none;
 }
 
+.readout-label {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.readout-label[hidden] {
+  display: none;
+}
+
 /* slider */
 
 .slider-wrap {
@@ -292,11 +305,26 @@ main.off .badge {
   border: 1px solid var(--panel-edge);
 }
 
+.controls {
+  --knob-size: 56px;
+  --knob-gap: 12px;
+  display: flex;
+  align-items: center;
+  gap: var(--knob-gap);
+}
+
+/* Keep the tick labels under the slider, not under the knob. */
+.slider-wrap.compression .ticks {
+  margin-right: calc(var(--knob-size) + var(--knob-gap));
+}
+
 input[type="range"] {
   --ratio: 0.333;
   appearance: none;
   -webkit-appearance: none;
+  flex: 1;
   width: 100%;
+  min-width: 0;
   height: 48px;
   margin: 0;
   background: transparent;
@@ -372,6 +400,71 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 .ticks span:last-child {
   left: 100%;
   transform: translateX(-100%);
+}
+
+/* arc knob (compression intensity) */
+
+.arc-knob {
+  position: relative;
+  flex: none;
+  width: var(--knob-size);
+  height: var(--knob-size);
+  border-radius: 50%;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.arc-knob[hidden] {
+  display: none;
+}
+
+.arc-knob svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.arc-knob .arc-track {
+  stroke: var(--track);
+}
+
+.arc-knob .arc-fill {
+  stroke: var(--fill-a);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--fill-a) 55%, transparent));
+  transition: stroke-dashoffset 0.12s var(--ease), stroke var(--tint);
+}
+
+.arc-knob.dragging .arc-fill {
+  transition: stroke var(--tint);
+}
+
+.arc-knob .arc-value {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  pointer-events: none;
+}
+
+.arc-knob:hover .arc-fill,
+.arc-knob.dragging .arc-fill {
+  stroke: var(--fill-b);
+}
+
+.arc-knob:focus-visible {
+  outline: 2px solid var(--fill-a);
+  outline-offset: 3px;
+}
+
+.arc-knob.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* footer */

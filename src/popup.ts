@@ -4,6 +4,7 @@ import {
   formatDb,
   isCapturableUrl,
   MAX_PERCENT,
+  MAX_TARGET,
   NATIVE_PERCENT,
   NATIVE_TARGET,
   percentFromPosition,
@@ -13,6 +14,7 @@ import {
   type TabStateView,
   type VolumeUnit,
 } from "./messages.js";
+import { ArcKnob } from "./knob.js";
 import {
   DEFAULT_SETTINGS,
   migrateLegacyUnit,
@@ -24,7 +26,9 @@ import {
 
 const slider = document.querySelector("#slider") as HTMLInputElement;
 const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
+const knobHost = document.querySelector("#knob") as HTMLElement;
 const readout = document.querySelector("#readout") as HTMLParagraphElement;
+const readoutLabel = document.querySelector("#readout-label") as HTMLParagraphElement;
 const reset = document.querySelector("#reset") as HTMLButtonElement;
 const limiter = document.querySelector("#limiter") as HTMLInputElement;
 const limiterChip = document.querySelector(".limiter") as HTMLElement;
@@ -45,16 +49,30 @@ const granularInput = document.querySelector("#granular") as HTMLInputElement;
 
 let tabId: number | undefined;
 let settings: Settings = DEFAULT_SETTINGS;
+let unit: VolumeUnit = settings.unit;
 
-sliderWrap.style.setProperty(
-  "--native-ratio",
-  String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
-);
+const UNAVAILABLE: TabStateView = {
+  percent: NATIVE_PERCENT,
+  target: NATIVE_TARGET,
+  intensity: DEFAULT_INTENSITY,
+  active: false,
+  compression: false,
+  capturable: false,
+  limiter: true,
+};
+/** Last state the background reported; repainted on unit and mode changes. */
+let last: TabStateView = UNAVAILABLE;
+
+function compressionOn(): boolean {
+  return settings.compression;
+}
+
+/* theme */
 
 type Rgb = [number, number, number];
 type Stop = [percent: number, color: Rgb];
 
-// Cold and dim at 0, indigo at native, then yellow -> orange -> red.
+// Gain mode: cold and dim at 0, indigo at native, then yellow -> orange -> red.
 const PRIMARY_STOPS: Stop[] = [
   [0, [0x3a, 0x4a, 0x6b]],
   [50, [0x56, 0x6e, 0xb0]],
@@ -75,6 +93,19 @@ const SECONDARY_STOPS: Stop[] = [
   [2000, [0xb8, 0x10, 0x40]],
 ];
 
+// Compression mode: a teal family over 0..100 so the mode reads differently at a glance.
+const TARGET_PRIMARY_STOPS: Stop[] = [
+  [0, [0x2f, 0x4f, 0x55]],
+  [50, [0x38, 0x9c, 0x94]],
+  [100, [0x4a, 0xd4, 0xc0]],
+];
+
+const TARGET_SECONDARY_STOPS: Stop[] = [
+  [0, [0x2a, 0x40, 0x60]],
+  [50, [0x3f, 0x8c, 0xc8]],
+  [100, [0x6a, 0xb8, 0xff]],
+];
+
 function mixColor(stops: readonly Stop[], value: number): string {
   let lo: Stop = stops[0] ?? [0, [0, 0, 0]];
   let hi: Stop = lo;
@@ -89,7 +120,7 @@ function mixColor(stops: readonly Stop[], value: number): string {
   return `rgb(${lerp(0)} ${lerp(1)} ${lerp(2)})`;
 }
 
-function paintTheme(value: number): void {
+function paintGainTheme(value: number): void {
   panel.style.setProperty("--fill-a", mixColor(PRIMARY_STOPS, value));
   panel.style.setProperty("--fill-b", mixColor(SECONDARY_STOPS, value));
   // 1 at 0%, 0 at native and above: drives panel darkening.
@@ -100,25 +131,82 @@ function paintTheme(value: number): void {
   panel.style.setProperty("--heat", heat.toFixed(3));
 }
 
-function badgeLabel(value: number, capturable: boolean): string {
-  if (!capturable) return "Unavailable";
-  if (value === 0) return "Muted";
-  if (value < NATIVE_PERCENT) return "Quiet";
-  if (value > NATIVE_PERCENT) return "Boost";
+/** Nothing exceeds full scale in compression mode, so there is no heat. */
+function paintTargetTheme(target: number): void {
+  panel.style.setProperty("--fill-a", mixColor(TARGET_PRIMARY_STOPS, target));
+  panel.style.setProperty("--fill-b", mixColor(TARGET_SECONDARY_STOPS, target));
+  panel.style.setProperty("--dim", Math.max(0, 1 - target / MAX_TARGET).toFixed(3));
+  panel.style.setProperty("--heat", "0");
+}
+
+function badgeLabel(state: TabStateView): string {
+  if (!state.capturable) return "Unavailable";
+  if (compressionOn()) {
+    if (!state.active) return "Idle";
+    if (state.intensity === 0) return "Passthrough";
+    return "Leveling";
+  }
+  if (state.percent === 0) return "Muted";
+  if (state.percent < NATIVE_PERCENT) return "Quiet";
+  if (state.percent > NATIVE_PERCENT) return "Boost";
   return "Native";
 }
 
+/* slider domain */
+
+function sliderMax(): number {
+  return compressionOn() ? MAX_TARGET : MAX_PERCENT;
+}
+
 function positionRatio(position: number): number {
-  return position / MAX_PERCENT;
+  return position / sliderMax();
+}
+
+/** Slider value for a state: linear target in compression mode, gamma position otherwise. */
+function positionFor(state: TabStateView): number {
+  return compressionOn() ? state.target : positionFromPercent(state.percent);
+}
+
+function valueFromPosition(position: number): number {
+  return compressionOn() ? Math.round(position) : percentFromPosition(position);
 }
 
 function setSliderPosition(position: number): void {
-  slider.max = String(MAX_PERCENT);
+  slider.max = String(sliderMax());
   slider.value = String(position);
   slider.style.setProperty("--ratio", String(positionRatio(position)));
 }
 
-let unit: VolumeUnit = settings.unit;
+/** Mode-dependent chrome around the slider: knob, tick labels, anchor position. */
+function paintMode(): void {
+  const compression = compressionOn();
+  sliderWrap.classList.toggle("compression", compression);
+  knobHost.hidden = !compression;
+  readoutLabel.hidden = !compression;
+  sliderWrap.style.setProperty(
+    "--native-ratio",
+    compression ? "0.5" : String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
+  );
+  paintUnitLabels();
+}
+
+function paintUnitLabels(): void {
+  const db = unit === "db";
+  if (compressionOn()) {
+    tickMin.textContent = db ? "−∞" : "0";
+    tickNative.textContent = db ? formatDb(50) : "50";
+    tickMax.textContent = db ? "0" : String(MAX_TARGET);
+    readoutLabel.textContent = db ? "Target dB" : "Target Volume";
+    reset.textContent = db ? "Reset to 0 dB" : "Reset to 100%";
+    slider.setAttribute("aria-label", db ? "Target volume in decibels" : "Target volume");
+    return;
+  }
+  tickMin.textContent = db ? "−∞" : "0";
+  tickNative.textContent = db ? "0" : "100";
+  tickMax.textContent = db ? `+${Math.round(dbFromPercent(MAX_PERCENT))}` : String(MAX_PERCENT);
+  reset.textContent = db ? "Reset to 0 dB" : "Reset to 100%";
+  slider.setAttribute("aria-label", db ? "Volume in decibels" : "Volume");
+}
 
 /** Paint the unit into every control that shows it. Does not persist. */
 function setUnit(next: VolumeUnit): void {
@@ -126,29 +214,32 @@ function setUnit(next: VolumeUnit): void {
   unitSwitch.dataset.unit = next;
   unitPercent.setAttribute("aria-pressed", String(next === "percent"));
   unitDb.setAttribute("aria-pressed", String(next === "db"));
-  tickMin.textContent = next === "db" ? "−∞" : "0";
-  tickNative.textContent = next === "db" ? "0" : "100";
-  tickMax.textContent =
-    next === "db" ? `+${Math.round(dbFromPercent(MAX_PERCENT))}` : String(MAX_PERCENT);
-  reset.textContent = next === "db" ? "Reset to 0 dB" : "Reset to 100%";
-  slider.setAttribute("aria-label", next === "db" ? "Volume in decibels" : "Volume");
+  paintUnitLabels();
 }
 
-function paintReadout(percent: number): void {
+function paintReadout(value: number): void {
   if (unit === "db") {
-    readout.innerHTML = `${formatDb(percent)}<span class="unit">dB</span>`;
+    readout.innerHTML = `${formatDb(value)}<span class="unit">dB</span>`;
     return;
   }
-  readout.innerHTML = `${percent}<span class="unit">%</span>`;
+  readout.innerHTML = `${value}<span class="unit">%</span>`;
 }
 
 function paint(state: TabStateView, syncSlider = true): void {
-  if (syncSlider) setSliderPosition(positionFromPercent(state.percent));
-  paintReadout(state.percent);
-  badge.textContent = badgeLabel(state.percent, state.capturable);
-  paintTheme(state.capturable ? state.percent : NATIVE_PERCENT);
+  last = state;
+  const compression = compressionOn();
+  const value = compression ? state.target : state.percent;
+  if (syncSlider) {
+    setSliderPosition(positionFor(state));
+    knob.set(state.intensity);
+  }
+  paintReadout(value);
+  badge.textContent = badgeLabel(state);
+  if (compression) paintTargetTheme(state.capturable ? value : NATIVE_TARGET);
+  else paintGainTheme(state.capturable ? value : NATIVE_PERCENT);
   panel.classList.toggle("off", !state.capturable);
   slider.disabled = !state.capturable;
+  knob.disabled = !state.capturable;
   reset.disabled = !state.capturable;
   limiter.disabled = !state.capturable;
   limiter.checked = state.limiter;
@@ -156,30 +247,30 @@ function paint(state: TabStateView, syncSlider = true): void {
   if (!state.capturable || !state.limiter) setClip(0);
 }
 
+/* messaging */
+
 async function send(request: BackgroundRequest): Promise<TabStateView> {
   return chrome.runtime.sendMessage(request);
 }
 
-let pending: number | undefined;
+type RequestFor = (tabId: number) => BackgroundRequest;
+
+let pending: RequestFor | undefined;
 let pendingSync = false;
 let sending = false;
 
-async function apply(next: number, syncSlider = false): Promise<void> {
-  pending = next;
+/** Coalesce rapid input: only the newest request is sent once the previous one returns. */
+async function apply(build: RequestFor, syncSlider = false): Promise<void> {
+  pending = build;
   pendingSync = pendingSync || syncSlider;
   if (sending) return;
   sending = true;
   while (pending !== undefined && tabId !== undefined) {
-    const value = pending;
+    const request = pending(tabId);
     const sync = pendingSync;
     pending = undefined;
     pendingSync = false;
-    const state = await send({
-      target: "background",
-      type: "setGain",
-      tabId,
-      percent: value,
-    });
+    const state = await send(request);
     paint(state, sync);
   }
   sending = false;
@@ -188,16 +279,37 @@ async function apply(next: number, syncSlider = false): Promise<void> {
 slider.addEventListener("input", () => {
   const position = Number(slider.value);
   slider.style.setProperty("--ratio", String(positionRatio(position)));
-  void apply(percentFromPosition(position));
+  const value = valueFromPosition(position);
+  if (compressionOn()) {
+    void apply((id) => ({ target: "background", type: "setTarget", tabId: id, percent: value }));
+  } else {
+    void apply((id) => ({ target: "background", type: "setGain", tabId: id, percent: value }));
+  }
+});
+
+const knob = new ArcKnob(knobHost, {
+  label: "Leveling intensity",
+  onInput: (value) => {
+    void apply((id) => ({ target: "background", type: "setIntensity", tabId: id, intensity: value }));
+  },
 });
 
 reset.addEventListener("click", () => {
-  void apply(NATIVE_PERCENT, true);
+  if (compressionOn()) {
+    void apply((id) => ({ target: "background", type: "release", tabId: id }), true);
+  } else {
+    void apply(
+      (id) => ({ target: "background", type: "setGain", tabId: id, percent: NATIVE_PERCENT }),
+      true,
+    );
+  }
 });
+
+/* settings */
 
 function chooseUnit(next: VolumeUnit): void {
   setUnit(next);
-  paintReadout(snapFromSlider());
+  paintReadout(valueFromSlider());
   void writeSettings({ unit: next });
 }
 
@@ -223,19 +335,28 @@ settingsToggle.addEventListener("click", () => {
   showSettings(settingsToggle.getAttribute("aria-expanded") !== "true");
 });
 
-/** Reflect the persisted settings in the settings view and the unit-dependent labels. */
+/** Reflect the persisted settings in the settings view and the mode-dependent main view. */
 function applySettings(next: Settings): void {
+  const previous = settings;
   settings = next;
   compressionInput.checked = next.compression;
   granularInput.checked = next.granular;
   if (next.unit !== unit) {
     setUnit(next.unit);
-    paintReadout(snapFromSlider());
+    paintReadout(valueFromSlider());
+  }
+  if (next.compression !== previous.compression) {
+    paintMode();
+    if (tabId !== undefined && last.capturable) {
+      void send({ target: "background", type: "getState", tabId }).then((state) => paint(state));
+    } else {
+      paint(last);
+    }
   }
 }
 
-function snapFromSlider(): number {
-  return percentFromPosition(Number(slider.value));
+function valueFromSlider(): number {
+  return valueFromPosition(Number(slider.value));
 }
 
 limiter.addEventListener("change", () => {
@@ -249,6 +370,8 @@ limiter.addEventListener("change", () => {
     if (!state.limiter) setClip(0);
   });
 });
+
+/* limiter clip meter */
 
 const motionOk = !matchMedia("(prefers-reduced-motion: reduce)").matches;
 let clipShown = 0;
@@ -289,10 +412,14 @@ function bumpClip(reduction: number): void {
   if (!clipRaf) clipRaf = requestAnimationFrame(tickClip);
 }
 
+/* startup */
+
 await migrateLegacyUnit();
 settings = await readSettings();
 setUnit(settings.unit);
-applySettings(settings);
+compressionInput.checked = settings.compression;
+granularInput.checked = settings.granular;
+paintMode();
 onSettingsChanged(applySettings);
 requestAnimationFrame(() => unitSwitch.classList.add("ready"));
 
@@ -305,15 +432,7 @@ chrome.runtime.onMessage.addListener((message: PopupEvent) => {
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 tabId = tab?.id;
 if (tabId === undefined || !isCapturableUrl(tab?.url)) {
-  paint({
-    percent: NATIVE_PERCENT,
-    target: NATIVE_TARGET,
-    intensity: DEFAULT_INTENSITY,
-    active: false,
-    compression: settings.compression,
-    capturable: false,
-    limiter: settings.limiter,
-  });
+  paint({ ...UNAVAILABLE, compression: settings.compression, limiter: settings.limiter });
 } else {
   paint(await send({ target: "background", type: "getState", tabId }));
   void chrome.runtime.sendMessage({
