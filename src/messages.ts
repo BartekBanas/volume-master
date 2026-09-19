@@ -4,9 +4,19 @@ export const NATIVE_PERCENT = 100;
 export const NATIVE_POSITION_RATIO = 1 / 3;
 export const NATIVE_POSITION = Math.round(MAX_PERCENT * NATIVE_POSITION_RATIO);
 
+/** Compression-mode target, in percent. 100 = the reference loudness. */
+export const NATIVE_TARGET = 100;
+export const MAX_TARGET = 100;
+/** Leveling strength 0..1; what a tab uses until its knob is touched. */
+export const DEFAULT_INTENSITY = 0.5;
+
 export type BackgroundRequest =
   | { target: "background"; type: "getState"; tabId: number }
   | { target: "background"; type: "setGain"; tabId: number; percent: number }
+  | { target: "background"; type: "setTarget"; tabId: number; percent: number }
+  | { target: "background"; type: "setIntensity"; tabId: number; intensity: number }
+  /** Compression-mode Reset: drop the tab's capture regardless of its values. */
+  | { target: "background"; type: "release"; tabId: number }
   | { target: "background"; type: "setLimiter"; enabled: boolean }
   | { target: "background"; type: "watchMeter"; tabId: number }
   | { target: "background"; type: "unwatchMeter" };
@@ -20,11 +30,21 @@ export type PopupEvent = {
 
 export type TabStateView = {
   percent: number;
+  target: number;
+  intensity: number;
+  /** Whether the tab's audio is currently captured. */
+  active: boolean;
+  compression: boolean;
   capturable: boolean;
   limiter: boolean;
 };
 
-export type OffscreenTabState = { captured: boolean; percent: number };
+export type OffscreenTabState = {
+  captured: boolean;
+  percent: number;
+  target: number;
+  intensity: number;
+};
 
 export type OffscreenRequest =
   | {
@@ -33,9 +53,16 @@ export type OffscreenRequest =
       tabId: number;
       streamId: string;
       percent: number;
+      targetPercent: number;
+      intensity: number;
       limiter: boolean;
+      compression: boolean;
     }
   | { target: "offscreen"; type: "setGain"; tabId: number; percent: number }
+  | { target: "offscreen"; type: "setTarget"; tabId: number; percent: number }
+  | { target: "offscreen"; type: "setIntensity"; tabId: number; intensity: number }
+  | { target: "offscreen"; type: "setCompression"; enabled: boolean }
+  | { target: "offscreen"; type: "listStates" }
   | { target: "offscreen"; type: "setLimiter"; enabled: boolean }
   | { target: "offscreen"; type: "detach"; tabId: number }
   | { target: "offscreen"; type: "getState"; tabId: number }
@@ -108,6 +135,16 @@ export function positionFromPercent(percent: number): number {
   }
   const t = p / MAX_PERCENT;
   return Math.round(MAX_PERCENT * t ** (1 / SLIDER_GAMMA));
+}
+
+export function snapTarget(raw: number): number {
+  if (!Number.isFinite(raw)) return NATIVE_TARGET;
+  return Math.min(MAX_TARGET, Math.max(0, Math.round(raw)));
+}
+
+export function clampIntensity(raw: number): number {
+  if (!Number.isFinite(raw)) return DEFAULT_INTENSITY;
+  return Math.min(1, Math.max(0, Math.round(raw * 100) / 100));
 }
 
 export type VolumeUnit = "percent" | "db";

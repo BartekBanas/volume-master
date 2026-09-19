@@ -1,9 +1,11 @@
 import {
   dbFromPercent,
+  DEFAULT_INTENSITY,
   formatDb,
   isCapturableUrl,
   MAX_PERCENT,
   NATIVE_PERCENT,
+  NATIVE_TARGET,
   percentFromPosition,
   positionFromPercent,
   type BackgroundRequest,
@@ -303,7 +305,15 @@ chrome.runtime.onMessage.addListener((message: PopupEvent) => {
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 tabId = tab?.id;
 if (tabId === undefined || !isCapturableUrl(tab?.url)) {
-  paint({ percent: NATIVE_PERCENT, capturable: false, limiter: true });
+  paint({
+    percent: NATIVE_PERCENT,
+    target: NATIVE_TARGET,
+    intensity: DEFAULT_INTENSITY,
+    active: false,
+    compression: settings.compression,
+    capturable: false,
+    limiter: settings.limiter,
+  });
 } else {
   paint(await send({ target: "background", type: "getState", tabId }));
   void chrome.runtime.sendMessage({
