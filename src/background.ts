@@ -7,6 +7,13 @@ import {
   type OffscreenTabState,
   type TabStateView,
 } from "./messages.js";
+import {
+  DEFAULT_SETTINGS,
+  onSettingsChanged,
+  readSettings,
+  writeSettings,
+  type Settings,
+} from "./settings.js";
 
 type RestorableState =
   | typeof chrome.windows.WindowState.NORMAL
@@ -25,8 +32,28 @@ type PromotedWindows = Record<string, RestorableState>;
 /** Bumped per window whenever we promote it, so a stale restore loop stops. */
 const promotionGeneration = new Map<number, number>();
 let creatingOffscreen: Promise<void> | null = null;
-let limiterEnabled = true;
 let meterTabId: number | null = null;
+
+/**
+ * Cached copy of chrome.storage.local "settings". The service worker restarts
+ * after idle, so the cache is reloaded on startup and kept fresh by onChanged.
+ */
+let settings: Settings = DEFAULT_SETTINGS;
+const settingsReady: Promise<void> = readSettings().then((loaded) => {
+  settings = loaded;
+});
+
+onSettingsChanged((next) => {
+  const previous = settings;
+  settings = next;
+  if (next.limiter !== previous.limiter) {
+    void (async () => {
+      if (await hasOffscreen()) {
+        await sendOffscreen({ target: "offscreen", type: "setLimiter", enabled: next.limiter });
+      }
+    })();
+  }
+});
 
 const BADGE_COLOR = "#1c1c24";
 
@@ -109,7 +136,7 @@ async function capture(tabId: number, percent: number): Promise<void> {
     tabId,
     streamId,
     percent,
-    limiter: limiterEnabled,
+    limiter: settings.limiter,
   });
   if (!result?.ok) {
     throw new Error(result?.error ?? "attach failed");
@@ -132,7 +159,7 @@ async function tabCapturable(tabId: number): Promise<boolean> {
 }
 
 function view(percent: number, capturable: boolean): TabStateView {
-  return { percent, capturable, limiter: limiterEnabled };
+  return { percent, capturable, limiter: settings.limiter };
 }
 
 async function getState(tabId: number): Promise<TabStateView> {
@@ -151,12 +178,10 @@ async function watchMeter(tabId: number | null): Promise<void> {
   }
 }
 
+/** Persists the flag; the onSettingsChanged listener pushes it to the offscreen graph. */
 async function setLimiter(enabled: boolean): Promise<TabStateView> {
-  limiterEnabled = enabled;
-  if (await hasOffscreen()) {
-    await sendOffscreen({ target: "offscreen", type: "setLimiter", enabled });
-  }
-  return view(NATIVE_PERCENT, true);
+  await writeSettings({ limiter: enabled });
+  return { ...view(NATIVE_PERCENT, true), limiter: enabled };
 }
 
 async function setGain(tabId: number, percent: number): Promise<TabStateView> {
@@ -209,19 +234,24 @@ async function recapture(tabId: number): Promise<void> {
 
 chrome.runtime.onMessage.addListener((message: BackgroundRequest, _sender, sendResponse) => {
   if (!message || message.target !== "background") return;
-  const task =
-    message.type === "getState"
-      ? getState(message.tabId)
-      : message.type === "setLimiter"
-        ? setLimiter(message.enabled)
-        : message.type === "watchMeter"
-          ? watchMeter(message.tabId)
-          : message.type === "unwatchMeter"
-            ? watchMeter(null)
-            : setGain(message.tabId, message.percent);
-  void task.then(sendResponse);
+  void settingsReady.then(() => dispatch(message)).then(sendResponse);
   return true;
 });
+
+async function dispatch(message: BackgroundRequest): Promise<unknown> {
+  switch (message.type) {
+    case "getState":
+      return getState(message.tabId);
+    case "setLimiter":
+      return setLimiter(message.enabled);
+    case "watchMeter":
+      return watchMeter(message.tabId);
+    case "unwatchMeter":
+      return watchMeter(null);
+    case "setGain":
+      return setGain(message.tabId, message.percent);
+  }
+}
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   needsRecapture.delete(tabId);

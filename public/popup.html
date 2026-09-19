@@ -12,37 +12,85 @@
         <h1>Volume Master</h1>
         <div class="header-meta">
           <span id="badge" class="badge">Native</span>
-          <div class="unit-switch" role="group" aria-label="Volume units" data-unit="percent">
-            <span class="unit-thumb" aria-hidden="true"></span>
-            <button type="button" id="unit-percent" aria-pressed="true">%</button>
-            <button type="button" id="unit-db" aria-pressed="false">dB</button>
-          </div>
+          <button
+            type="button"
+            id="settings-toggle"
+            class="icon-button"
+            aria-label="Settings"
+            aria-expanded="false"
+            aria-controls="settings-view"
+          >
+            <svg class="icon icon-gear" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5.1-1-.1-1 2-1.6-1.9-3.3-2.4.9a7 7 0 0 0-1.7-1L15 3.5H9l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-.9L2.6 9.4l2 1.6-.1 1 .1 1-2 1.6 1.9 3.3 2.4-.9a7 7 0 0 0 1.7 1l.4 2.5h6l.4-2.5a7 7 0 0 0 1.7-1l2.4.9 1.9-3.3-2-1.6Z"
+              />
+            </svg>
+            <svg class="icon icon-back" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2Z" />
+            </svg>
+          </button>
         </div>
       </header>
 
-      <section class="readout-row">
-        <p id="readout">100<span class="unit">%</span></p>
-      </section>
+      <div class="views">
+        <section id="main-view" class="view">
+          <section class="readout-row">
+            <p id="readout">100<span class="unit">%</span></p>
+          </section>
 
-      <div class="slider-wrap">
-        <input id="slider" type="range" min="0" max="2000" value="667" step="1" aria-label="Volume" />
-        <div class="ticks" aria-hidden="true">
-          <span id="tick-min">0</span>
-          <span id="tick-native" class="native">100</span>
-          <span id="tick-max">2000</span>
-        </div>
+          <div class="slider-wrap">
+            <input id="slider" type="range" min="0" max="2000" value="667" step="1" aria-label="Volume" />
+            <div class="ticks" aria-hidden="true">
+              <span id="tick-min">0</span>
+              <span id="tick-native" class="native">100</span>
+              <span id="tick-max">2000</span>
+            </div>
+          </div>
+
+          <footer>
+            <button id="reset" type="button">Reset to 100%</button>
+            <label class="setting-row limiter">
+              <input id="limiter" type="checkbox" checked />
+              <span class="limiter-text">Limiter</span>
+              <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+            </label>
+          </footer>
+
+          <p id="note" hidden>Can't control this page</p>
+        </section>
+
+        <section id="settings-view" class="view" aria-label="Settings" hidden>
+          <div class="setting-row">
+            <span class="setting-text">
+              <span class="setting-label">Units</span>
+              <span class="setting-desc">Percent or decibels</span>
+            </span>
+            <div class="unit-switch" role="group" aria-label="Volume units" data-unit="percent">
+              <span class="unit-thumb" aria-hidden="true"></span>
+              <button type="button" id="unit-percent" aria-pressed="true">%</button>
+              <button type="button" id="unit-db" aria-pressed="false">dB</button>
+            </div>
+          </div>
+
+          <label class="setting-row">
+            <input id="compression" type="checkbox" />
+            <span class="setting-text">
+              <span class="setting-label">Compression mode</span>
+              <span class="setting-desc">Level audio toward a target volume</span>
+            </span>
+            <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+          </label>
+
+          <label class="setting-row">
+            <input id="granular" type="checkbox" />
+            <span class="setting-text">
+              <span class="setting-label">Granular mode</span>
+              <span class="setting-desc">Slider snaps to preset stops</span>
+            </span>
+            <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+          </label>
+        </section>
       </div>
-
-      <footer>
-        <button id="reset" type="button">Reset to 100%</button>
-        <label class="limiter">
-          <input id="limiter" type="checkbox" checked />
-          <span class="limiter-text">Limiter</span>
-          <span class="switch" aria-hidden="true"><span class="knob"></span></span>
-        </label>
-      </footer>
-
-      <p id="note" hidden>Can't control this page</p>
     </main>
     <script type="module" src="popup.js"></script>
   </body>

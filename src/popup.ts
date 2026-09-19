@@ -11,8 +11,14 @@ import {
   type TabStateView,
   type VolumeUnit,
 } from "./messages.js";
-
-const UNIT_KEY = "volume-master.unit";
+import {
+  DEFAULT_SETTINGS,
+  migrateLegacyUnit,
+  onSettingsChanged,
+  readSettings,
+  writeSettings,
+  type Settings,
+} from "./settings.js";
 
 const slider = document.querySelector("#slider") as HTMLInputElement;
 const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
@@ -29,8 +35,14 @@ const unitDb = document.querySelector("#unit-db") as HTMLButtonElement;
 const tickMin = document.querySelector("#tick-min") as HTMLSpanElement;
 const tickNative = document.querySelector("#tick-native") as HTMLSpanElement;
 const tickMax = document.querySelector("#tick-max") as HTMLSpanElement;
+const settingsToggle = document.querySelector("#settings-toggle") as HTMLButtonElement;
+const mainView = document.querySelector("#main-view") as HTMLElement;
+const settingsView = document.querySelector("#settings-view") as HTMLElement;
+const compressionInput = document.querySelector("#compression") as HTMLInputElement;
+const granularInput = document.querySelector("#granular") as HTMLInputElement;
 
 let tabId: number | undefined;
+let settings: Settings = DEFAULT_SETTINGS;
 
 sliderWrap.style.setProperty(
   "--native-ratio",
@@ -104,15 +116,11 @@ function setSliderPosition(position: number): void {
   slider.style.setProperty("--ratio", String(positionRatio(position)));
 }
 
-function readUnit(): VolumeUnit {
-  return localStorage.getItem(UNIT_KEY) === "db" ? "db" : "percent";
-}
+let unit: VolumeUnit = settings.unit;
 
-let unit: VolumeUnit = readUnit();
-
+/** Paint the unit into every control that shows it. Does not persist. */
 function setUnit(next: VolumeUnit): void {
   unit = next;
-  localStorage.setItem(UNIT_KEY, next);
   unitSwitch.dataset.unit = next;
   unitPercent.setAttribute("aria-pressed", String(next === "percent"));
   unitDb.setAttribute("aria-pressed", String(next === "db"));
@@ -185,15 +193,44 @@ reset.addEventListener("click", () => {
   void apply(NATIVE_PERCENT, true);
 });
 
-unitPercent.addEventListener("click", () => {
-  setUnit("percent");
+function chooseUnit(next: VolumeUnit): void {
+  setUnit(next);
   paintReadout(snapFromSlider());
+  void writeSettings({ unit: next });
+}
+
+unitPercent.addEventListener("click", () => chooseUnit("percent"));
+unitDb.addEventListener("click", () => chooseUnit("db"));
+
+compressionInput.addEventListener("change", () => {
+  void writeSettings({ compression: compressionInput.checked });
 });
 
-unitDb.addEventListener("click", () => {
-  setUnit("db");
-  paintReadout(snapFromSlider());
+granularInput.addEventListener("change", () => {
+  void writeSettings({ granular: granularInput.checked });
 });
+
+function showSettings(open: boolean): void {
+  settingsToggle.setAttribute("aria-expanded", String(open));
+  settingsToggle.setAttribute("aria-label", open ? "Back" : "Settings");
+  mainView.hidden = open;
+  settingsView.hidden = !open;
+}
+
+settingsToggle.addEventListener("click", () => {
+  showSettings(settingsToggle.getAttribute("aria-expanded") !== "true");
+});
+
+/** Reflect the persisted settings in the settings view and the unit-dependent labels. */
+function applySettings(next: Settings): void {
+  settings = next;
+  compressionInput.checked = next.compression;
+  granularInput.checked = next.granular;
+  if (next.unit !== unit) {
+    setUnit(next.unit);
+    paintReadout(snapFromSlider());
+  }
+}
 
 function snapFromSlider(): number {
   return percentFromPosition(Number(slider.value));
@@ -250,7 +287,11 @@ function bumpClip(reduction: number): void {
   if (!clipRaf) clipRaf = requestAnimationFrame(tickClip);
 }
 
-setUnit(unit);
+await migrateLegacyUnit();
+settings = await readSettings();
+setUnit(settings.unit);
+applySettings(settings);
+onSettingsChanged(applySettings);
 requestAnimationFrame(() => unitSwitch.classList.add("ready"));
 
 chrome.runtime.onMessage.addListener((message: PopupEvent) => {
