@@ -83,7 +83,7 @@ function paintTheme(value: number): void {
   panel.style.setProperty("--dim", dim.toFixed(3));
   // 0 at native, 1 at max: drives glow intensity.
   const heat = Math.max(0, (value - NATIVE_PERCENT) / (MAX_PERCENT - NATIVE_PERCENT));
-  panel.style.setProperty("--heat", Math.sqrt(heat).toFixed(3));
+  panel.style.setProperty("--heat", heat.toFixed(3));
 }
 
 function badgeLabel(value: number, capturable: boolean): string {

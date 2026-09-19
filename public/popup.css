@@ -39,8 +39,8 @@ body {
 
 main {
   --panel: color-mix(in srgb, var(--panel-base), #050609 calc(var(--dim) * 55%));
-  --glow-a: color-mix(in srgb, var(--fill-a) calc(10% + var(--heat) * 14%), transparent);
-  --glow-b: color-mix(in srgb, var(--fill-b) calc(7% + var(--heat) * 10%), transparent);
+  --glow-a: color-mix(in srgb, var(--fill-a) calc(10% + var(--heat) * 36%), transparent);
+  --glow-b: color-mix(in srgb, var(--fill-b) calc(7% + var(--heat) * 28%), transparent);
 
   position: relative;
   display: grid;
@@ -261,7 +261,7 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.12),
     0 3px 14px rgba(0, 0, 0, 0.5),
-    0 0 calc(16px + var(--heat) * 18px) -4px var(--fill-a);
+    0 0 calc(16px + var(--heat) * 42px) -4px var(--fill-a);
   transition: transform 0.15s var(--ease), box-shadow var(--tint);
 }
 
@@ -412,7 +412,7 @@ footer {
   background: linear-gradient(90deg, var(--fill-a), var(--fill-b));
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--fill-a) 40%, transparent),
-    0 0 calc(8px + var(--heat) * 8px + var(--clip) * 10px) -2px var(--fill-a);
+    0 0 calc(8px + var(--heat) * 22px + var(--clip) * 10px) -2px var(--fill-a);
 }
 
 .limiter:has(input:checked) .knob {
