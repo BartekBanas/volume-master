@@ -21,8 +21,15 @@ import {
   onSettingsChanged,
   readSettings,
   writeSettings,
+  type Granularity,
   type Settings,
 } from "./settings.js";
+import {
+  indexRatio,
+  nativeIndex,
+  nearestStopIndex,
+  stopsFor,
+} from "./stops.js";
 
 const slider = document.querySelector("#slider") as HTMLInputElement;
 const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
@@ -45,7 +52,12 @@ const settingsToggle = document.querySelector("#settings-toggle") as HTMLButtonE
 const mainView = document.querySelector("#main-view") as HTMLElement;
 const settingsView = document.querySelector("#settings-view") as HTMLElement;
 const compressionInput = document.querySelector("#compression") as HTMLInputElement;
-const granularInput = document.querySelector("#granular") as HTMLInputElement;
+const granularitySwitch = document.querySelector(".granularity-switch") as HTMLElement;
+const GRANULARITY_LEVELS: Granularity[] = ["off", "on"];
+const granularityButtons: Record<Granularity, HTMLButtonElement> = {
+  off: document.querySelector("#granularity-off") as HTMLButtonElement,
+  on: document.querySelector("#granularity-on") as HTMLButtonElement,
+};
 
 let tabId: number | undefined;
 let settings: Settings = DEFAULT_SETTINGS;
@@ -154,27 +166,75 @@ function badgeLabel(state: TabStateView): string {
 
 /* slider domain */
 
+function isGranular(): boolean {
+  return settings.granularity !== "off";
+}
+
+function activeStops(): readonly number[] {
+  if (!isGranular()) return [];
+  const kind = compressionOn() ? "target" : "gain";
+  return stopsFor(kind);
+}
+
 function sliderMax(): number {
   return compressionOn() ? MAX_TARGET : MAX_PERCENT;
 }
 
+function configureSliderDomain(): void {
+  const stops = activeStops();
+  sliderWrap.classList.toggle("granular", stops.length > 0);
+  if (stops.length > 0) {
+    slider.min = "0";
+    slider.max = String(stops.length - 1);
+    slider.step = "1";
+    sliderWrap.style.setProperty("--stop-count", String(stops.length));
+    sliderWrap.style.setProperty(
+      "--native-ratio",
+      String(indexRatio(nativeIndex(stops), stops.length)),
+    );
+    return;
+  }
+  slider.min = "0";
+  slider.max = String(sliderMax());
+  slider.step = "1";
+}
+
 function positionRatio(position: number): number {
+  const stops = activeStops();
+  if (stops.length > 0) return indexRatio(position, stops.length);
   return position / sliderMax();
 }
 
-/** Slider value for a state: linear target in compression mode, gamma position otherwise. */
+/** Slider value for a state: stop index when granular, else gamma/linear position. */
 function positionFor(state: TabStateView): number {
-  return compressionOn() ? state.target : positionFromPercent(state.percent);
+  const value = compressionOn() ? state.target : state.percent;
+  const stops = activeStops();
+  if (stops.length > 0) return nearestStopIndex(stops, value);
+  return compressionOn() ? value : positionFromPercent(value);
 }
 
 function valueFromPosition(position: number): number {
+  const stops = activeStops();
+  if (stops.length > 0) {
+    const index = Math.min(stops.length - 1, Math.max(0, Math.round(position)));
+    return stops[index]!;
+  }
   return compressionOn() ? Math.round(position) : percentFromPosition(position);
 }
 
 function setSliderPosition(position: number): void {
-  slider.max = String(sliderMax());
+  configureSliderDomain();
   slider.value = String(position);
   slider.style.setProperty("--ratio", String(positionRatio(position)));
+  const stops = activeStops();
+  if (stops.length === 0) {
+    sliderWrap.style.setProperty(
+      "--native-ratio",
+      compressionOn()
+        ? "0.5"
+        : String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
+    );
+  }
 }
 
 /** Mode-dependent chrome around the slider: knob, tick labels, anchor position. */
@@ -183,11 +243,14 @@ function paintMode(remapSlider = false): void {
   sliderWrap.classList.toggle("compression", compression);
   knobHost.hidden = !compression;
   readoutLabel.hidden = !compression;
-  sliderWrap.style.setProperty(
-    "--native-ratio",
-    compression ? "0.5" : String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
-  );
-  slider.max = String(sliderMax());
+  configureSliderDomain();
+  const stops = activeStops();
+  if (stops.length === 0) {
+    sliderWrap.style.setProperty(
+      "--native-ratio",
+      compression ? "0.5" : String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
+    );
+  }
   if (remapSlider) {
     setSliderPosition(positionFor(last));
   } else {
@@ -338,9 +401,33 @@ compressionInput.addEventListener("change", () => {
   );
 });
 
-granularInput.addEventListener("change", () => {
-  void writeSettings({ granular: granularInput.checked });
-});
+function setGranularityUI(level: Granularity): void {
+  granularitySwitch.dataset.granularity = level;
+  for (const g of GRANULARITY_LEVELS) {
+    granularityButtons[g].setAttribute("aria-pressed", String(g === level));
+  }
+}
+
+function chooseGranularity(level: Granularity): void {
+  if (level === settings.granularity) return;
+  void writeSettings({ granularity: level });
+}
+
+for (const g of GRANULARITY_LEVELS) {
+  granularityButtons[g].addEventListener("click", () => chooseGranularity(g));
+}
+
+/** Snap the active tab to the nearest stop and write audio when granularity changes. */
+function applyGranularity(): void {
+  paintMode(true);
+  if (!isGranular() || !last.capturable || tabId === undefined) return;
+  const value = valueFromSlider();
+  if (compressionOn()) {
+    void apply((id) => ({ target: "background", type: "setTarget", tabId: id, percent: value }));
+  } else {
+    void apply((id) => ({ target: "background", type: "setGain", tabId: id, percent: value }));
+  }
+}
 
 function showSettings(open: boolean): void {
   settingsToggle.setAttribute("aria-expanded", String(open));
@@ -355,11 +442,15 @@ settingsToggle.addEventListener("click", () => {
 
 /** Reflect the persisted settings in the settings view and the mode-dependent main view. */
 function applySettings(next: Settings): void {
+  const granularityChanged = next.granularity !== settings.granularity;
   settings = next;
-  granularInput.checked = next.granular;
+  setGranularityUI(next.granularity);
   if (next.unit !== unit) {
     setUnit(next.unit);
     paintReadout(valueFromSlider());
+  }
+  if (granularityChanged) {
+    applyGranularity();
   }
 }
 
@@ -425,9 +516,13 @@ function bumpClip(reduction: number): void {
 await migrateLegacyUnit();
 settings = await readSettings();
 setUnit(settings.unit);
-granularInput.checked = settings.granular;
+setGranularityUI(settings.granularity);
+configureSliderDomain();
 onSettingsChanged(applySettings);
-requestAnimationFrame(() => unitSwitch.classList.add("ready"));
+requestAnimationFrame(() => {
+  unitSwitch.classList.add("ready");
+  granularitySwitch.classList.add("ready");
+});
 
 chrome.runtime.onMessage.addListener((message: PopupEvent) => {
   if (message?.target !== "popup" || message.type !== "limiterMeter") return;

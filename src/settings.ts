@@ -1,14 +1,16 @@
 import type { VolumeUnit } from "./messages.js";
 
+export type Granularity = "off" | "on";
+
 export type Settings = {
   unit: VolumeUnit;
-  granular: boolean;
+  granularity: Granularity;
   limiter: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
   unit: "percent",
-  granular: false,
+  granularity: "off",
   limiter: true,
 };
 
@@ -16,11 +18,27 @@ const STORAGE_KEY = "settings";
 /** Pre-0.3 the popup kept the unit in localStorage under this key. */
 const LEGACY_UNIT_KEY = "volume-master.unit";
 
+function normalizeGranularity(value: Record<string, unknown>): Granularity {
+  if (value.granularity === "on" || value.granularity === "off") {
+    return value.granularity;
+  }
+  // Legacy: boolean toggle or multi-level enum all map to on.
+  if (value.granular === true) return "on";
+  if (
+    value.granularity === "small" ||
+    value.granularity === "medium" ||
+    value.granularity === "large"
+  ) {
+    return "on";
+  }
+  return DEFAULT_SETTINGS.granularity;
+}
+
 function normalize(raw: unknown): Settings {
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
     unit: value.unit === "db" ? "db" : DEFAULT_SETTINGS.unit,
-    granular: typeof value.granular === "boolean" ? value.granular : DEFAULT_SETTINGS.granular,
+    granularity: normalizeGranularity(value),
     limiter: typeof value.limiter === "boolean" ? value.limiter : DEFAULT_SETTINGS.limiter,
   };
 }

@@ -317,9 +317,55 @@ main.off .badge {
 }
 
 .slider-column {
+  position: relative;
   display: grid;
   gap: 10px;
   min-width: 0;
+}
+
+/* Granular stop marks sit below the thumb, aligned to thumb-center positions. */
+.stop-ticks {
+  display: none;
+  position: relative;
+  height: 6px;
+  margin: -4px calc(var(--thumb) / 2) -2px;
+  pointer-events: none;
+}
+
+.slider-wrap.granular .stop-ticks {
+  display: block;
+}
+
+.slider-wrap.granular .slider-column {
+  gap: 8px;
+}
+
+.stop-ticks::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--faint) 45%, transparent) 0,
+    color-mix(in srgb, var(--faint) 45%, transparent) 1px,
+    transparent 1px,
+    transparent calc(100% / (var(--stop-count, 2) - 1))
+  );
+  mask-image: linear-gradient(180deg, transparent 15%, #000 55%, #000 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 15%, #000 55%, #000 100%);
+}
+
+.stop-ticks::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: 0;
+  left: calc(var(--native-ratio) * 100%);
+  width: 1px;
+  margin-left: -0.5px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--fill-a) 40%, var(--text));
+  box-shadow: 0 0 4px color-mix(in srgb, var(--fill-a) 25%, transparent);
 }
 
 #knob[hidden] {
@@ -553,8 +599,77 @@ label.setting-row {
   color: var(--faint);
 }
 
-.setting-row .unit-switch {
+.setting-row .unit-switch,
+.setting-row .granularity-switch {
   margin-left: auto;
+}
+
+.granularity-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: none;
+  padding: 1px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-edge);
+}
+
+.granularity-thumb {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 1px;
+  width: calc((100% - 2px) / 2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fill-a) 18%, transparent);
+  pointer-events: none;
+}
+
+.granularity-switch.ready .granularity-thumb {
+  transition: transform 0.22s var(--ease), background var(--tint);
+}
+
+.granularity-switch[data-granularity="on"] .granularity-thumb {
+  transform: translateX(100%);
+}
+
+.granularity-switch button {
+  position: relative;
+  z-index: 1;
+  min-width: 28px;
+  min-height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.22s var(--ease);
+}
+
+.granularity-switch button[aria-pressed="true"] {
+  color: var(--text);
+}
+
+.granularity-switch button:hover:not([aria-pressed="true"]) {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.granularity-switch button:focus-visible {
+  outline: 2px solid var(--fill-a);
+  outline-offset: 1px;
+}
+
+.granularity-switch button:active:not(:disabled) {
+  transform: none;
 }
 
 .limiter {
