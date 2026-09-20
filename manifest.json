@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Volume Master",
-  "version": "0.2.0",
-  "description": "Per-tab volume from 0 to 1000 percent.",
+  "version": "0.2.1",
+  "description": "Per-tab volume from 0 to 2000 percent.",
   "permissions": ["tabCapture", "offscreen", "activeTab", "storage"],
   "background": {
     "service_worker": "background.js",

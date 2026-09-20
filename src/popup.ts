@@ -1,4 +1,5 @@
 import {
+  dbFromPercent,
   formatDb,
   isCapturableUrl,
   MAX_PERCENT,
@@ -47,6 +48,7 @@ const PRIMARY_STOPS: Stop[] = [
   [200, [0xe8, 0xd2, 0x7a]],
   [450, [0xff, 0x9b, 0x4a]],
   [1000, [0xff, 0x4d, 0x5e]],
+  [2000, [0xf0, 0x22, 0x50]],
 ];
 
 const SECONDARY_STOPS: Stop[] = [
@@ -56,6 +58,7 @@ const SECONDARY_STOPS: Stop[] = [
   [200, [0xf2, 0xb9, 0x5a]],
   [450, [0xff, 0x6b, 0x4a]],
   [1000, [0xe0, 0x30, 0x4a]],
+  [2000, [0xb8, 0x10, 0x40]],
 ];
 
 function mixColor(stops: readonly Stop[], value: number): string {
@@ -80,7 +83,7 @@ function paintTheme(value: number): void {
   panel.style.setProperty("--dim", dim.toFixed(3));
   // 0 at native, 1 at max: drives glow intensity.
   const heat = Math.max(0, (value - NATIVE_PERCENT) / (MAX_PERCENT - NATIVE_PERCENT));
-  panel.style.setProperty("--heat", Math.sqrt(heat).toFixed(3));
+  panel.style.setProperty("--heat", heat.toFixed(3));
 }
 
 function badgeLabel(value: number, capturable: boolean): string {
@@ -115,7 +118,8 @@ function setUnit(next: VolumeUnit): void {
   unitDb.setAttribute("aria-pressed", String(next === "db"));
   tickMin.textContent = next === "db" ? "−∞" : "0";
   tickNative.textContent = next === "db" ? "0" : "100";
-  tickMax.textContent = next === "db" ? "+20" : "1000";
+  tickMax.textContent =
+    next === "db" ? `+${Math.round(dbFromPercent(MAX_PERCENT))}` : String(MAX_PERCENT);
   reset.textContent = next === "db" ? "Reset to 0 dB" : "Reset to 100%";
   slider.setAttribute("aria-label", next === "db" ? "Volume in decibels" : "Volume");
 }
