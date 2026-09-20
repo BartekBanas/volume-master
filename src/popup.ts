@@ -178,7 +178,7 @@ function setSliderPosition(position: number): void {
 }
 
 /** Mode-dependent chrome around the slider: knob, tick labels, anchor position. */
-function paintMode(): void {
+function paintMode(remapSlider = false): void {
   const compression = compressionOn();
   sliderWrap.classList.toggle("compression", compression);
   knobHost.hidden = !compression;
@@ -187,6 +187,12 @@ function paintMode(): void {
     "--native-ratio",
     compression ? "0.5" : String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
   );
+  slider.max = String(sliderMax());
+  if (remapSlider) {
+    setSliderPosition(positionFor(last));
+  } else {
+    slider.style.setProperty("--ratio", String(positionRatio(Number(slider.value))));
+  }
   paintUnitLabels();
 }
 
@@ -229,11 +235,10 @@ function paint(state: TabStateView, syncSlider = true): void {
   last = state;
   compressionInput.checked = state.compression;
   compressionInput.disabled = !state.capturable;
-  paintMode();
+  paintMode(syncSlider);
   const compression = compressionOn();
   const value = compression ? state.target : state.percent;
   if (syncSlider) {
-    setSliderPosition(positionFor(state));
     knob.set(state.intensity);
   }
   paintReadout(value);
@@ -321,7 +326,7 @@ unitDb.addEventListener("click", () => chooseUnit("db"));
 
 compressionInput.addEventListener("change", () => {
   last = { ...last, compression: compressionInput.checked };
-  paintMode();
+  paintMode(true);
   void apply(
     (id) => ({
       target: "background",

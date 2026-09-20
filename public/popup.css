@@ -297,8 +297,6 @@ main.off .badge {
   /* Linear position ratio for the 100% mark; set from popup.ts. */
   --native-ratio: 0.333;
 
-  display: grid;
-  gap: 10px;
   padding: 18px 16px 14px;
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.025);
@@ -308,14 +306,28 @@ main.off .badge {
 .controls {
   --knob-size: 56px;
   --knob-gap: 12px;
-  display: flex;
-  align-items: center;
-  gap: var(--knob-gap);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 
-/* Keep the tick labels under the slider, not under the knob. */
-.slider-wrap.compression .ticks {
-  margin-right: calc(var(--knob-size) + var(--knob-gap));
+.slider-wrap.compression .controls {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--knob-gap);
+  align-items: center;
+}
+
+.slider-column {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+#knob[hidden] {
+  display: none;
+}
+
+#knob:not([hidden]) {
+  align-self: center;
 }
 
 input[type="range"] {
