@@ -18,6 +18,7 @@ export type BackgroundRequest =
   /** Compression-mode Reset: drop the tab's capture regardless of its values. */
   | { target: "background"; type: "release"; tabId: number }
   | { target: "background"; type: "setLimiter"; enabled: boolean }
+  | { target: "background"; type: "setCompression"; tabId: number; enabled: boolean }
   | { target: "background"; type: "watchMeter"; tabId: number }
   | { target: "background"; type: "unwatchMeter" };
 
@@ -44,6 +45,7 @@ export type OffscreenTabState = {
   percent: number;
   target: number;
   intensity: number;
+  compression: boolean;
 };
 
 export type OffscreenRequest =
@@ -61,7 +63,7 @@ export type OffscreenRequest =
   | { target: "offscreen"; type: "setGain"; tabId: number; percent: number }
   | { target: "offscreen"; type: "setTarget"; tabId: number; percent: number }
   | { target: "offscreen"; type: "setIntensity"; tabId: number; intensity: number }
-  | { target: "offscreen"; type: "setCompression"; enabled: boolean }
+  | { target: "offscreen"; type: "setCompression"; tabId: number; enabled: boolean }
   | { target: "offscreen"; type: "listStates" }
   | { target: "offscreen"; type: "setLimiter"; enabled: boolean }
   | { target: "offscreen"; type: "detach"; tabId: number }

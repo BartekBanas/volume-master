@@ -64,7 +64,7 @@ const UNAVAILABLE: TabStateView = {
 let last: TabStateView = UNAVAILABLE;
 
 function compressionOn(): boolean {
-  return settings.compression;
+  return last.compression;
 }
 
 /* theme */
@@ -227,6 +227,9 @@ function paintReadout(value: number): void {
 
 function paint(state: TabStateView, syncSlider = true): void {
   last = state;
+  compressionInput.checked = state.compression;
+  compressionInput.disabled = !state.capturable;
+  paintMode();
   const compression = compressionOn();
   const value = compression ? state.target : state.percent;
   if (syncSlider) {
@@ -317,7 +320,17 @@ unitPercent.addEventListener("click", () => chooseUnit("percent"));
 unitDb.addEventListener("click", () => chooseUnit("db"));
 
 compressionInput.addEventListener("change", () => {
-  void writeSettings({ compression: compressionInput.checked });
+  last = { ...last, compression: compressionInput.checked };
+  paintMode();
+  void apply(
+    (id) => ({
+      target: "background",
+      type: "setCompression",
+      tabId: id,
+      enabled: compressionInput.checked,
+    }),
+    true,
+  );
 });
 
 granularInput.addEventListener("change", () => {
@@ -337,21 +350,11 @@ settingsToggle.addEventListener("click", () => {
 
 /** Reflect the persisted settings in the settings view and the mode-dependent main view. */
 function applySettings(next: Settings): void {
-  const previous = settings;
   settings = next;
-  compressionInput.checked = next.compression;
   granularInput.checked = next.granular;
   if (next.unit !== unit) {
     setUnit(next.unit);
     paintReadout(valueFromSlider());
-  }
-  if (next.compression !== previous.compression) {
-    paintMode();
-    if (tabId !== undefined && last.capturable) {
-      void send({ target: "background", type: "getState", tabId }).then((state) => paint(state));
-    } else {
-      paint(last);
-    }
   }
 }
 
@@ -417,9 +420,7 @@ function bumpClip(reduction: number): void {
 await migrateLegacyUnit();
 settings = await readSettings();
 setUnit(settings.unit);
-compressionInput.checked = settings.compression;
 granularInput.checked = settings.granular;
-paintMode();
 onSettingsChanged(applySettings);
 requestAnimationFrame(() => unitSwitch.classList.add("ready"));
 
@@ -432,7 +433,7 @@ chrome.runtime.onMessage.addListener((message: PopupEvent) => {
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 tabId = tab?.id;
 if (tabId === undefined || !isCapturableUrl(tab?.url)) {
-  paint({ ...UNAVAILABLE, compression: settings.compression, limiter: settings.limiter });
+  paint({ ...UNAVAILABLE, limiter: settings.limiter });
 } else {
   paint(await send({ target: "background", type: "getState", tabId }));
   void chrome.runtime.sendMessage({

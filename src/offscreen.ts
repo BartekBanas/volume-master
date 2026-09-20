@@ -17,6 +17,7 @@ type Graph = {
   /** Compression-mode target in percent of the reference loudness. */
   target: number;
   intensity: number;
+  compression: boolean;
 };
 
 /**
@@ -33,7 +34,6 @@ const graphs = new Map<number, Graph>();
 let limiterReady: Promise<boolean> | null = null;
 let levelerReady: Promise<boolean> | null = null;
 let meterTabId: number | null = null;
-let compressionOn = false;
 
 function percentToGain(percent: number): number {
   return percent / 100;
@@ -55,9 +55,9 @@ function setBypass(node: AudioWorkletNode, enabled: boolean): void {
   param(node, "bypass")?.setValueAtTime(enabled ? 0 : 1, ctx.currentTime);
 }
 
-/** Apply the current mode to one graph: who carries the volume, gain or leveler. */
+/** Apply this graph's mode: who carries the volume, gain or leveler. */
 function applyMode(graph: Graph): void {
-  if (compressionOn && graph.leveler) {
+  if (graph.compression && graph.leveler) {
     rampGain(graph.gain, 1);
     param(graph.leveler, "target")?.setValueAtTime(targetToRms(graph.target), ctx.currentTime);
     param(graph.leveler, "intensity")?.setValueAtTime(graph.intensity, ctx.currentTime);
@@ -138,7 +138,6 @@ async function attach(tabId: number, streamId: string, options: AttachOptions): 
   if (ctx.state === "suspended") {
     await ctx.resume();
   }
-  compressionOn = options.compression;
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       mandatory: {
@@ -150,7 +149,7 @@ async function attach(tabId: number, streamId: string, options: AttachOptions): 
   });
   const source = ctx.createMediaStreamSource(stream);
   const gain = ctx.createGain();
-  gain.gain.value = compressionOn ? 1 : percentToGain(options.percent);
+  gain.gain.value = options.compression ? 1 : percentToGain(options.percent);
 
   const ready = await ensureWorklets();
   let limiter: AudioWorkletNode | null = null;
@@ -185,6 +184,7 @@ async function attach(tabId: number, streamId: string, options: AttachOptions): 
     percent: options.percent,
     target: options.target,
     intensity: options.intensity,
+    compression: options.compression,
   };
   graphs.set(tabId, graph);
   applyMode(graph);
@@ -194,14 +194,14 @@ function setGain(tabId: number, percent: number): void {
   const graph = graphs.get(tabId);
   if (!graph) return;
   graph.percent = percent;
-  if (!compressionOn) rampGain(graph.gain, percentToGain(percent));
+  if (!graph.compression) rampGain(graph.gain, percentToGain(percent));
 }
 
 function setTarget(tabId: number, percent: number): void {
   const graph = graphs.get(tabId);
   if (!graph) return;
   graph.target = percent;
-  if (compressionOn && graph.leveler) {
+  if (graph.compression && graph.leveler) {
     param(graph.leveler, "target")?.setTargetAtTime(targetToRms(percent), ctx.currentTime, 0.02);
   }
 }
@@ -210,7 +210,7 @@ function setIntensity(tabId: number, intensity: number): void {
   const graph = graphs.get(tabId);
   if (!graph) return;
   graph.intensity = intensity;
-  if (compressionOn && graph.leveler) {
+  if (graph.compression && graph.leveler) {
     param(graph.leveler, "intensity")?.setTargetAtTime(intensity, ctx.currentTime, 0.02);
   }
 }
@@ -221,20 +221,29 @@ function setLimiter(enabled: boolean): void {
   }
 }
 
-function setCompression(enabled: boolean): void {
-  compressionOn = enabled;
-  for (const graph of graphs.values()) applyMode(graph);
+function setCompression(tabId: number, enabled: boolean): void {
+  const graph = graphs.get(tabId);
+  if (!graph) return;
+  graph.compression = enabled;
+  applyMode(graph);
 }
 
 function getState(tabId: number): OffscreenTabState {
   const graph = graphs.get(tabId);
   return graph
-    ? { captured: true, percent: graph.percent, target: graph.target, intensity: graph.intensity }
+    ? {
+        captured: true,
+        percent: graph.percent,
+        target: graph.target,
+        intensity: graph.intensity,
+        compression: graph.compression,
+      }
     : {
         captured: false,
         percent: NATIVE_PERCENT,
         target: NATIVE_TARGET,
         intensity: DEFAULT_INTENSITY,
+        compression: false,
       };
 }
 
@@ -263,7 +272,7 @@ async function handle(message: OffscreenRequest): Promise<unknown> {
       setIntensity(message.tabId, message.intensity);
       return { ok: true };
     case "setCompression":
-      setCompression(message.enabled);
+      setCompression(message.tabId, message.enabled);
       return { ok: true };
     case "listStates":
       return { ok: true, states: listStates() };

@@ -2,14 +2,12 @@ import type { VolumeUnit } from "./messages.js";
 
 export type Settings = {
   unit: VolumeUnit;
-  compression: boolean;
   granular: boolean;
   limiter: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
   unit: "percent",
-  compression: false,
   granular: false,
   limiter: true,
 };
@@ -22,8 +20,6 @@ function normalize(raw: unknown): Settings {
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
     unit: value.unit === "db" ? "db" : DEFAULT_SETTINGS.unit,
-    compression:
-      typeof value.compression === "boolean" ? value.compression : DEFAULT_SETTINGS.compression,
     granular: typeof value.granular === "boolean" ? value.granular : DEFAULT_SETTINGS.granular,
     limiter: typeof value.limiter === "boolean" ? value.limiter : DEFAULT_SETTINGS.limiter,
   };
