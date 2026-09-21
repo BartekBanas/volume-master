@@ -165,14 +165,14 @@ async function offscreenState(tabId: number): Promise<OffscreenTabState> {
 }
 
 /**
- * Gain mode shows the bare percent, compression mode prefixes the target with
- * "T" so the two never read the same. Nothing is shown for a tab we don't hold.
+ * Gain mode shows the bare percent. Compression mode shows the target, 0 to 100.
+ * Nothing is shown for a tab we don't hold.
  */
 async function setBadge(tabId: number, state: OffscreenTabState): Promise<void> {
   const text = !state.captured
     ? ""
     : state.compression
-      ? `T${state.target}`
+      ? String(state.target)
       : state.percent === NATIVE_PERCENT
         ? ""
         : String(state.percent);
