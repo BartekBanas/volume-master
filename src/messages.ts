@@ -4,8 +4,12 @@ export const NATIVE_PERCENT = 100;
 export const NATIVE_POSITION_RATIO = 1 / 3;
 export const NATIVE_POSITION = Math.round(MAX_PERCENT * NATIVE_POSITION_RATIO);
 
-/** Compression-mode target, in percent. 100 = the reference loudness. */
-export const NATIVE_TARGET = 100;
+/**
+ * Compression-mode default target, in percent of full-scale RMS. Not "native":
+ * that word means unity gain, which has no counterpart in compression mode.
+ */
+export const DEFAULT_TARGET = 50;
+/** Compression-mode maximum target; 100% is 0 dBFS RMS. */
 export const MAX_TARGET = 100;
 /** Leveling strength 0..1; what a tab uses until its knob is touched. */
 export const DEFAULT_INTENSITY = 0.5;
@@ -140,8 +144,13 @@ export function positionFromPercent(percent: number): number {
 }
 
 export function snapTarget(raw: number): number {
-  if (!Number.isFinite(raw)) return NATIVE_TARGET;
+  if (!Number.isFinite(raw)) return DEFAULT_TARGET;
   return Math.min(MAX_TARGET, Math.max(0, Math.round(raw)));
+}
+
+/** Linear RMS amplitude the leveler aims for; 100% target is 0 dBFS. */
+export function targetToRms(percent: number): number {
+  return snapTarget(percent) / MAX_TARGET;
 }
 
 export function clampIntensity(raw: number): number {
@@ -158,11 +167,25 @@ export function dbFromPercent(percent: number): number {
   return 20 * Math.log10(p / NATIVE_PERCENT);
 }
 
-export function formatDb(percent: number): string {
-  const db = dbFromPercent(percent);
+/** RMS dBFS from compression target percent. 100% is 0 dBFS, 0% is −∞. */
+export function dbFromTarget(percent: number): number {
+  const p = snapTarget(percent);
+  if (p <= 0) return Number.NEGATIVE_INFINITY;
+  return 20 * Math.log10(p / MAX_TARGET);
+}
+
+function formatDbValue(db: number): string {
   if (!Number.isFinite(db)) return "−∞";
   const rounded = Math.round(db * 10) / 10;
   if (Object.is(rounded, -0) || rounded === 0) return "0.0";
   const abs = Math.abs(rounded).toFixed(1);
   return `${rounded > 0 ? "+" : "−"}${abs}`;
+}
+
+export function formatDb(percent: number): string {
+  return formatDbValue(dbFromPercent(percent));
+}
+
+export function formatTargetDb(percent: number): string {
+  return formatDbValue(dbFromTarget(percent));
 }

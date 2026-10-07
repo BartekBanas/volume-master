@@ -3,7 +3,7 @@ import {
   DEFAULT_INTENSITY,
   isCapturableUrl,
   NATIVE_PERCENT,
-  NATIVE_TARGET,
+  DEFAULT_TARGET,
   snapPercent,
   snapTarget,
   type BackgroundRequest,
@@ -63,7 +63,7 @@ const BADGE_COLOR = "#1c1c24";
 const NOT_CAPTURED: OffscreenTabState = {
   captured: false,
   percent: NATIVE_PERCENT,
-  target: NATIVE_TARGET,
+  target: DEFAULT_TARGET,
   intensity: DEFAULT_INTENSITY,
   compression: false,
 };
@@ -152,13 +152,15 @@ async function offscreenState(tabId: number): Promise<OffscreenTabState> {
   const result = await sendOffscreen({ target: "offscreen", type: "getState", tabId });
   if (!result?.captured) return idleState(tabId);
   const compression = result.compression ?? false;
-  if (compression && !compressedTabs.has(tabId)) {
-    void setTabCompressed(tabId, true);
+  // The live graph wins in both directions, so a missed response can never
+  // leave the remembered flag disagreeing with what is actually playing.
+  if (compression !== compressedTabs.has(tabId)) {
+    void setTabCompressed(tabId, compression);
   }
   return {
     captured: true,
     percent: result.percent ?? NATIVE_PERCENT,
-    target: result.target ?? NATIVE_TARGET,
+    target: result.target ?? DEFAULT_TARGET,
     intensity: result.intensity ?? DEFAULT_INTENSITY,
     compression,
   };
@@ -221,7 +223,12 @@ async function capture(tabId: number, state: OffscreenTabState): Promise<void> {
   }
 }
 
-async function fallBackNative(tabId: number): Promise<void> {
+/**
+ * Drop the capture for a tab and clear its badge. A failed detach is ignored:
+ * it only fails when the offscreen document is already gone, and the stream
+ * died with it, so Idle is the true state either way.
+ */
+async function dropCapture(tabId: number): Promise<void> {
   await detachTab(tabId).catch(() => undefined);
   await closeOffscreenIfEmpty();
   await setBadge(tabId, NOT_CAPTURED);
@@ -266,12 +273,9 @@ async function setLimiter(enabled: boolean): Promise<TabStateView> {
   return { ...view(NOT_CAPTURED, true), limiter: enabled };
 }
 
-/** Drop the capture for a tab and clear its badge. */
 async function release(tabId: number): Promise<TabStateView> {
   const capturable = await tabCapturable(tabId);
-  await detachTab(tabId);
-  await closeOffscreenIfEmpty();
-  await setBadge(tabId, NOT_CAPTURED);
+  await dropCapture(tabId);
   return view(idleState(tabId), capturable);
 }
 
@@ -297,7 +301,7 @@ async function pushToTab(
     await setBadge(tabId, captured);
     return view(captured, true);
   } catch {
-    await fallBackNative(tabId);
+    await dropCapture(tabId);
     return view(idleState(tabId), true);
   }
 }
@@ -359,13 +363,16 @@ async function setCompression(tabId: number, enabled: boolean): Promise<TabState
   if (!capturable) {
     return view(NOT_CAPTURED, false);
   }
-  await setTabCompressed(tabId, enabled);
+  // Read before flipping the flag: offscreenState re-syncs the flag from the live graph.
   const current = await offscreenState(tabId);
+  await setTabCompressed(tabId, enabled);
   if (!current.captured) {
     return view(idleState(tabId), true);
   }
   if (!enabled && current.percent === NATIVE_PERCENT) {
-    return release(tabId);
+    // Not release(): capturability was already checked above.
+    await dropCapture(tabId);
+    return view(idleState(tabId), true);
   }
   const result = await sendOffscreen({
     target: "offscreen",
@@ -374,7 +381,7 @@ async function setCompression(tabId: number, enabled: boolean): Promise<TabState
     enabled,
   });
   if (!result?.ok) {
-    await fallBackNative(tabId);
+    await dropCapture(tabId);
     return view(idleState(tabId), true);
   }
   const next = { ...current, captured: true, compression: enabled };
@@ -390,7 +397,7 @@ async function recapture(tabId: number): Promise<void> {
     await capture(tabId, state);
     await setBadge(tabId, state);
   } catch {
-    await fallBackNative(tabId);
+    await dropCapture(tabId);
   }
 }
 

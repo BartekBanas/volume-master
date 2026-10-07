@@ -4,7 +4,9 @@
  * downstream catches anything this overshoots.
  *
  * Parameters (all k-rate):
- *   target    linear RMS amplitude of full scale the leveler aims for
+ *   target    linear RMS amplitude of full scale the leveler aims for.
+ *             offscreen.ts sets it on every graph, so the default is only a
+ *             fallback; it mirrors DEFAULT_TARGET / MAX_TARGET in src/messages.ts.
  *   intensity 0 = unity gain, 1 = full leveling; gain = desired ** intensity
  *   bypass    >= 0.5 passes audio through untouched
  */
@@ -19,7 +21,7 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
     return [
       {
         name: "target",
-        defaultValue: 0.2,
+        defaultValue: 0.5,
         minValue: 0,
         maxValue: 1,
         automationRate: "k-rate",
@@ -81,7 +83,7 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
     }
 
     const rms = this.trackLevel(input, channelCount, frames);
-    const target = parameters.target[0] ?? 0.2;
+    const target = parameters.target[0] ?? 0.5;
     const intensity = parameters.intensity[0] ?? 0.5;
 
     let nextGain = this.gain;

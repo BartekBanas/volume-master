@@ -2,11 +2,12 @@ import {
   dbFromPercent,
   DEFAULT_INTENSITY,
   formatDb,
+  formatTargetDb,
   isCapturableUrl,
   MAX_PERCENT,
   MAX_TARGET,
   NATIVE_PERCENT,
-  NATIVE_TARGET,
+  DEFAULT_TARGET,
   percentFromPosition,
   positionFromPercent,
   type BackgroundRequest,
@@ -26,8 +27,7 @@ import {
 } from "./settings.js";
 import {
   indexRatio,
-  nativeIndex,
-  nearestStopIndex,
+    nearestStopIndex,
   stopsFor,
 } from "./stops.js";
 
@@ -65,7 +65,7 @@ let unit: VolumeUnit = settings.unit;
 
 const UNAVAILABLE: TabStateView = {
   percent: NATIVE_PERCENT,
-  target: NATIVE_TARGET,
+  target: DEFAULT_TARGET,
   intensity: DEFAULT_INTENSITY,
   active: false,
   compression: false,
@@ -180,6 +180,18 @@ function sliderMax(): number {
   return compressionOn() ? MAX_TARGET : MAX_PERCENT;
 }
 
+/** Where the anchor value (native gain, or the default target) sits along the track. */
+function anchorRatio(): number {
+  const stops = activeStops();
+  if (stops.length > 0) {
+    const anchor = compressionOn() ? DEFAULT_TARGET : NATIVE_PERCENT;
+    return indexRatio(nearestStopIndex(stops, anchor), stops.length);
+  }
+  return compressionOn()
+    ? DEFAULT_TARGET / MAX_TARGET
+    : positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT;
+}
+
 function configureSliderDomain(): void {
   const stops = activeStops();
   sliderWrap.classList.toggle("granular", stops.length > 0);
@@ -188,15 +200,12 @@ function configureSliderDomain(): void {
     slider.max = String(stops.length - 1);
     slider.step = "1";
     sliderWrap.style.setProperty("--stop-count", String(stops.length));
-    sliderWrap.style.setProperty(
-      "--native-ratio",
-      String(indexRatio(nativeIndex(stops), stops.length)),
-    );
-    return;
+  } else {
+    slider.min = "0";
+    slider.max = String(sliderMax());
+    slider.step = "1";
   }
-  slider.min = "0";
-  slider.max = String(sliderMax());
-  slider.step = "1";
+  sliderWrap.style.setProperty("--native-ratio", String(anchorRatio()));
 }
 
 function positionRatio(position: number): number {
@@ -226,15 +235,6 @@ function setSliderPosition(position: number): void {
   configureSliderDomain();
   slider.value = String(position);
   slider.style.setProperty("--ratio", String(positionRatio(position)));
-  const stops = activeStops();
-  if (stops.length === 0) {
-    sliderWrap.style.setProperty(
-      "--native-ratio",
-      compressionOn()
-        ? "0.5"
-        : String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
-    );
-  }
 }
 
 /** Mode-dependent chrome around the slider: knob, tick labels, anchor position. */
@@ -244,13 +244,6 @@ function paintMode(remapSlider = false): void {
   knobHost.hidden = !compression;
   readoutLabel.hidden = !compression;
   configureSliderDomain();
-  const stops = activeStops();
-  if (stops.length === 0) {
-    sliderWrap.style.setProperty(
-      "--native-ratio",
-      compression ? "0.5" : String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
-    );
-  }
   if (remapSlider) {
     setSliderPosition(positionFor(last));
   } else {
@@ -263,11 +256,13 @@ function paintUnitLabels(): void {
   const db = unit === "db";
   if (compressionOn()) {
     tickMin.textContent = db ? "−∞" : "0";
-    tickNative.textContent = db ? formatDb(50) : "50";
-    tickMax.textContent = db ? "0" : String(MAX_TARGET);
-    readoutLabel.textContent = db ? "Target dB" : "Target Volume";
-    reset.textContent = db ? "Reset to 0 dB" : "Reset to 100%";
-    slider.setAttribute("aria-label", db ? "Target volume in decibels" : "Target volume");
+    tickNative.textContent = db ? formatTargetDb(DEFAULT_TARGET) : String(DEFAULT_TARGET);
+    tickMax.textContent = db ? formatTargetDb(MAX_TARGET) : String(MAX_TARGET);
+    readoutLabel.textContent = db ? "Target dBFS" : "Target Volume";
+    reset.textContent = db
+      ? `Reset to ${formatTargetDb(DEFAULT_TARGET)} dB`
+      : `Reset to ${DEFAULT_TARGET}%`;
+    slider.setAttribute("aria-label", db ? "Target volume in dBFS" : "Target volume");
     return;
   }
   tickMin.textContent = db ? "−∞" : "0";
@@ -288,7 +283,8 @@ function setUnit(next: VolumeUnit): void {
 
 function paintReadout(value: number): void {
   if (unit === "db") {
-    readout.innerHTML = `${formatDb(value)}<span class="unit">dB</span>`;
+    const text = compressionOn() ? formatTargetDb(value) : formatDb(value);
+    readout.innerHTML = `${text}<span class="unit">dB</span>`;
     return;
   }
   readout.innerHTML = `${value}<span class="unit">%</span>`;
@@ -306,7 +302,7 @@ function paint(state: TabStateView, syncSlider = true): void {
   }
   paintReadout(value);
   badge.textContent = badgeLabel(state);
-  if (compression) paintTargetTheme(state.capturable ? value : NATIVE_TARGET);
+  if (compression) paintTargetTheme(state.capturable ? value : DEFAULT_TARGET);
   else paintGainTheme(state.capturable ? value : NATIVE_PERCENT);
   panel.classList.toggle("off", !state.capturable);
   slider.disabled = !state.capturable;
@@ -320,31 +316,50 @@ function paint(state: TabStateView, syncSlider = true): void {
 
 /* messaging */
 
-async function send(request: BackgroundRequest): Promise<TabStateView> {
+/** Resolves undefined if the background closed the port without answering. */
+async function send(request: BackgroundRequest): Promise<TabStateView | undefined> {
   return chrome.runtime.sendMessage(request);
 }
 
 type RequestFor = (tabId: number) => BackgroundRequest;
+type Queued = { request: BackgroundRequest; sync: boolean };
 
-let pending: RequestFor | undefined;
-let pendingSync = false;
+const queue: Queued[] = [];
 let sending = false;
 
-/** Coalesce rapid input: only the newest request is sent once the previous one returns. */
+/**
+ * Serialize requests to the background. Rapid input of the same type (slider,
+ * knob) coalesces so only the newest value is sent; a request of a different
+ * type is never dropped, so a mode switch queued behind a slider drag survives.
+ */
 async function apply(build: RequestFor, syncSlider = false): Promise<void> {
-  pending = build;
-  pendingSync = pendingSync || syncSlider;
+  if (tabId === undefined) return;
+  const request = build(tabId);
+  const tail = queue[queue.length - 1];
+  if (tail && tail.request.type === request.type) {
+    tail.request = request;
+    tail.sync = tail.sync || syncSlider;
+  } else {
+    queue.push({ request, sync: syncSlider });
+  }
   if (sending) return;
   sending = true;
-  while (pending !== undefined && tabId !== undefined) {
-    const request = pending(tabId);
-    const sync = pendingSync;
-    pending = undefined;
-    pendingSync = false;
-    const state = await send(request);
-    paint(state, sync);
+  try {
+    let next: Queued | undefined;
+    while ((next = queue.shift()) !== undefined) {
+      let state: TabStateView | undefined;
+      try {
+        state = await send(next.request);
+      } catch (err) {
+        // Service worker went away mid-request. Skip this one; the queue stays alive.
+        console.warn("background unreachable", err);
+        continue;
+      }
+      if (state) paint(state, next.sync);
+    }
+  } finally {
+    sending = false;
   }
-  sending = false;
 }
 
 slider.addEventListener("input", () => {
@@ -388,15 +403,11 @@ unitPercent.addEventListener("click", () => chooseUnit("percent"));
 unitDb.addEventListener("click", () => chooseUnit("db"));
 
 compressionInput.addEventListener("change", () => {
-  last = { ...last, compression: compressionInput.checked };
+  const enabled = compressionInput.checked;
+  last = { ...last, compression: enabled };
   paintMode(true);
   void apply(
-    (id) => ({
-      target: "background",
-      type: "setCompression",
-      tabId: id,
-      enabled: compressionInput.checked,
-    }),
+    (id) => ({ target: "background", type: "setCompression", tabId: id, enabled }),
     true,
   );
 });
@@ -464,10 +475,13 @@ limiter.addEventListener("change", () => {
     target: "background",
     type: "setLimiter",
     enabled: limiter.checked,
-  }).then((state) => {
-    limiter.checked = state.limiter;
-    if (!state.limiter) setClip(0);
-  });
+  })
+    .then((state) => {
+      if (!state) return;
+      limiter.checked = state.limiter;
+      if (!state.limiter) setClip(0);
+    })
+    .catch((err: unknown) => console.warn("background unreachable", err));
 });
 
 /* limiter clip meter */
@@ -535,7 +549,8 @@ tabId = tab?.id;
 if (tabId === undefined || !isCapturableUrl(tab?.url)) {
   paint({ ...UNAVAILABLE, limiter: settings.limiter });
 } else {
-  paint(await send({ target: "background", type: "getState", tabId }));
+  const state = await send({ target: "background", type: "getState", tabId });
+  paint(state ?? { ...UNAVAILABLE, limiter: settings.limiter });
   void chrome.runtime.sendMessage({
     target: "background",
     type: "watchMeter",

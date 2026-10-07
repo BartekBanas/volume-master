@@ -31,8 +31,3 @@ export function nearestStopIndex(stops: readonly number[], value: number): numbe
 export function indexRatio(index: number, stopCount: number): number {
   return stopCount <= 1 ? 0 : index / (stopCount - 1);
 }
-
-export function nativeIndex(stops: readonly number[]): number {
-  const idx = stops.indexOf(100);
-  return idx >= 0 ? idx : 0;
-}

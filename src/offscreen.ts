@@ -1,5 +1,10 @@
 import type { OffscreenRequest, OffscreenTabState, PopupEvent } from "./messages.js";
-import { DEFAULT_INTENSITY, NATIVE_PERCENT, NATIVE_TARGET } from "./messages.js";
+import {
+  DEFAULT_INTENSITY,
+  NATIVE_PERCENT,
+  DEFAULT_TARGET,
+  targetToRms,
+} from "./messages.js";
 
 /**
  * Per-tab graph: source -> gain -> leveler -> limiter -> destination.
@@ -20,14 +25,6 @@ type Graph = {
   compression: boolean;
 };
 
-/**
- * RMS amplitude that a 100% target aims for. Real programme material sits well
- * below full scale (a full-scale sine is only 0.707 RMS), so aiming at 1.0
- * would pin the leveler at its ceiling. 0.2 is about -14 dBFS, the loudness
- * most streaming services normalise to.
- */
-const REFERENCE_RMS = 0.2;
-
 const ctx = new AudioContext();
 const graphs = new Map<number, Graph>();
 
@@ -37,10 +34,6 @@ let meterTabId: number | null = null;
 
 function percentToGain(percent: number): number {
   return percent / 100;
-}
-
-function targetToRms(percent: number): number {
-  return (percent / 100) * REFERENCE_RMS;
 }
 
 function param(node: AudioWorkletNode, name: string): AudioParam | undefined {
@@ -241,7 +234,7 @@ function getState(tabId: number): OffscreenTabState {
     : {
         captured: false,
         percent: NATIVE_PERCENT,
-        target: NATIVE_TARGET,
+        target: DEFAULT_TARGET,
         intensity: DEFAULT_INTENSITY,
         compression: false,
       };
