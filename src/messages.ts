@@ -4,10 +4,25 @@ export const NATIVE_PERCENT = 100;
 export const NATIVE_POSITION_RATIO = 1 / 3;
 export const NATIVE_POSITION = Math.round(MAX_PERCENT * NATIVE_POSITION_RATIO);
 
+/**
+ * Compression-mode default target, in percent of full-scale RMS. Not "native":
+ * that word means unity gain, which has no counterpart in compression mode.
+ */
+export const DEFAULT_TARGET = 50;
+/** Compression-mode maximum target; 100% is 0 dBFS RMS. */
+export const MAX_TARGET = 100;
+/** Leveling strength 0..1; what a tab uses until its knob is touched. */
+export const DEFAULT_INTENSITY = 0.5;
+
 export type BackgroundRequest =
   | { target: "background"; type: "getState"; tabId: number }
   | { target: "background"; type: "setGain"; tabId: number; percent: number }
+  | { target: "background"; type: "setTarget"; tabId: number; percent: number }
+  | { target: "background"; type: "setIntensity"; tabId: number; intensity: number }
+  /** Compression-mode Reset: drop the tab's capture regardless of its values. */
+  | { target: "background"; type: "release"; tabId: number }
   | { target: "background"; type: "setLimiter"; enabled: boolean }
+  | { target: "background"; type: "setCompression"; tabId: number; enabled: boolean }
   | { target: "background"; type: "watchMeter"; tabId: number }
   | { target: "background"; type: "unwatchMeter" };
 
@@ -20,11 +35,22 @@ export type PopupEvent = {
 
 export type TabStateView = {
   percent: number;
+  target: number;
+  intensity: number;
+  /** Whether the tab's audio is currently captured. */
+  active: boolean;
+  compression: boolean;
   capturable: boolean;
   limiter: boolean;
 };
 
-export type OffscreenTabState = { captured: boolean; percent: number };
+export type OffscreenTabState = {
+  captured: boolean;
+  percent: number;
+  target: number;
+  intensity: number;
+  compression: boolean;
+};
 
 export type OffscreenRequest =
   | {
@@ -33,9 +59,16 @@ export type OffscreenRequest =
       tabId: number;
       streamId: string;
       percent: number;
+      targetPercent: number;
+      intensity: number;
       limiter: boolean;
+      compression: boolean;
     }
   | { target: "offscreen"; type: "setGain"; tabId: number; percent: number }
+  | { target: "offscreen"; type: "setTarget"; tabId: number; percent: number }
+  | { target: "offscreen"; type: "setIntensity"; tabId: number; intensity: number }
+  | { target: "offscreen"; type: "setCompression"; tabId: number; enabled: boolean }
+  | { target: "offscreen"; type: "listStates" }
   | { target: "offscreen"; type: "setLimiter"; enabled: boolean }
   | { target: "offscreen"; type: "detach"; tabId: number }
   | { target: "offscreen"; type: "getState"; tabId: number }
@@ -110,6 +143,21 @@ export function positionFromPercent(percent: number): number {
   return Math.round(MAX_PERCENT * t ** (1 / SLIDER_GAMMA));
 }
 
+export function snapTarget(raw: number): number {
+  if (!Number.isFinite(raw)) return DEFAULT_TARGET;
+  return Math.min(MAX_TARGET, Math.max(0, Math.round(raw)));
+}
+
+/** Linear RMS amplitude the leveler aims for; 100% target is 0 dBFS. */
+export function targetToRms(percent: number): number {
+  return snapTarget(percent) / MAX_TARGET;
+}
+
+export function clampIntensity(raw: number): number {
+  if (!Number.isFinite(raw)) return DEFAULT_INTENSITY;
+  return Math.min(1, Math.max(0, Math.round(raw * 100) / 100));
+}
+
 export type VolumeUnit = "percent" | "db";
 
 /** Amplitude dB from percent. 100% is 0 dB, 2000% is +26 dB, 0% is −∞. */
@@ -119,11 +167,25 @@ export function dbFromPercent(percent: number): number {
   return 20 * Math.log10(p / NATIVE_PERCENT);
 }
 
-export function formatDb(percent: number): string {
-  const db = dbFromPercent(percent);
+/** RMS dBFS from compression target percent. 100% is 0 dBFS, 0% is −∞. */
+export function dbFromTarget(percent: number): number {
+  const p = snapTarget(percent);
+  if (p <= 0) return Number.NEGATIVE_INFINITY;
+  return 20 * Math.log10(p / MAX_TARGET);
+}
+
+function formatDbValue(db: number): string {
   if (!Number.isFinite(db)) return "−∞";
   const rounded = Math.round(db * 10) / 10;
   if (Object.is(rounded, -0) || rounded === 0) return "0.0";
   const abs = Math.abs(rounded).toFixed(1);
   return `${rounded > 0 ? "+" : "−"}${abs}`;
+}
+
+export function formatDb(percent: number): string {
+  return formatDbValue(dbFromPercent(percent));
+}
+
+export function formatTargetDb(percent: number): string {
+  return formatDbValue(dbFromTarget(percent));
 }

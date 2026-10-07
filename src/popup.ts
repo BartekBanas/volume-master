@@ -1,9 +1,13 @@
 import {
   dbFromPercent,
+  DEFAULT_INTENSITY,
   formatDb,
+  formatTargetDb,
   isCapturableUrl,
   MAX_PERCENT,
+  MAX_TARGET,
   NATIVE_PERCENT,
+  DEFAULT_TARGET,
   percentFromPosition,
   positionFromPercent,
   type BackgroundRequest,
@@ -11,12 +15,27 @@ import {
   type TabStateView,
   type VolumeUnit,
 } from "./messages.js";
-
-const UNIT_KEY = "volume-master.unit";
+import { ArcKnob } from "./knob.js";
+import {
+  DEFAULT_SETTINGS,
+  migrateLegacyUnit,
+  onSettingsChanged,
+  readSettings,
+  writeSettings,
+  type Granularity,
+  type Settings,
+} from "./settings.js";
+import {
+  indexRatio,
+    nearestStopIndex,
+  stopsFor,
+} from "./stops.js";
 
 const slider = document.querySelector("#slider") as HTMLInputElement;
 const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
+const knobHost = document.querySelector("#knob") as HTMLElement;
 const readout = document.querySelector("#readout") as HTMLParagraphElement;
+const readoutLabel = document.querySelector("#readout-label") as HTMLParagraphElement;
 const reset = document.querySelector("#reset") as HTMLButtonElement;
 const limiter = document.querySelector("#limiter") as HTMLInputElement;
 const limiterChip = document.querySelector(".limiter") as HTMLElement;
@@ -29,18 +48,43 @@ const unitDb = document.querySelector("#unit-db") as HTMLButtonElement;
 const tickMin = document.querySelector("#tick-min") as HTMLSpanElement;
 const tickNative = document.querySelector("#tick-native") as HTMLSpanElement;
 const tickMax = document.querySelector("#tick-max") as HTMLSpanElement;
+const settingsToggle = document.querySelector("#settings-toggle") as HTMLButtonElement;
+const mainView = document.querySelector("#main-view") as HTMLElement;
+const settingsView = document.querySelector("#settings-view") as HTMLElement;
+const compressionInput = document.querySelector("#compression") as HTMLInputElement;
+const granularitySwitch = document.querySelector(".granularity-switch") as HTMLElement;
+const GRANULARITY_LEVELS: Granularity[] = ["off", "on"];
+const granularityButtons: Record<Granularity, HTMLButtonElement> = {
+  off: document.querySelector("#granularity-off") as HTMLButtonElement,
+  on: document.querySelector("#granularity-on") as HTMLButtonElement,
+};
 
 let tabId: number | undefined;
+let settings: Settings = DEFAULT_SETTINGS;
+let unit: VolumeUnit = settings.unit;
 
-sliderWrap.style.setProperty(
-  "--native-ratio",
-  String(positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT),
-);
+const UNAVAILABLE: TabStateView = {
+  percent: NATIVE_PERCENT,
+  target: DEFAULT_TARGET,
+  intensity: DEFAULT_INTENSITY,
+  active: false,
+  compression: false,
+  capturable: false,
+  limiter: true,
+};
+/** Last state the background reported; repainted on unit and mode changes. */
+let last: TabStateView = UNAVAILABLE;
+
+function compressionOn(): boolean {
+  return last.compression;
+}
+
+/* theme */
 
 type Rgb = [number, number, number];
 type Stop = [percent: number, color: Rgb];
 
-// Cold and dim at 0, indigo at native, then yellow -> orange -> red.
+// Gain mode: cold and dim at 0, indigo at native, then yellow -> orange -> red.
 const PRIMARY_STOPS: Stop[] = [
   [0, [0x3a, 0x4a, 0x6b]],
   [50, [0x56, 0x6e, 0xb0]],
@@ -61,6 +105,19 @@ const SECONDARY_STOPS: Stop[] = [
   [2000, [0xb8, 0x10, 0x40]],
 ];
 
+// Compression mode: a teal family over 0..100 so the mode reads differently at a glance.
+const TARGET_PRIMARY_STOPS: Stop[] = [
+  [0, [0x2f, 0x4f, 0x55]],
+  [50, [0x38, 0x9c, 0x94]],
+  [100, [0x4a, 0xd4, 0xc0]],
+];
+
+const TARGET_SECONDARY_STOPS: Stop[] = [
+  [0, [0x2a, 0x40, 0x60]],
+  [50, [0x3f, 0x8c, 0xc8]],
+  [100, [0x6a, 0xb8, 0xff]],
+];
+
 function mixColor(stops: readonly Stop[], value: number): string {
   let lo: Stop = stops[0] ?? [0, [0, 0, 0]];
   let hi: Stop = lo;
@@ -75,7 +132,7 @@ function mixColor(stops: readonly Stop[], value: number): string {
   return `rgb(${lerp(0)} ${lerp(1)} ${lerp(2)})`;
 }
 
-function paintTheme(value: number): void {
+function paintGainTheme(value: number): void {
   panel.style.setProperty("--fill-a", mixColor(PRIMARY_STOPS, value));
   panel.style.setProperty("--fill-b", mixColor(SECONDARY_STOPS, value));
   // 1 at 0%, 0 at native and above: drives panel darkening.
@@ -86,59 +143,170 @@ function paintTheme(value: number): void {
   panel.style.setProperty("--heat", heat.toFixed(3));
 }
 
-function badgeLabel(value: number, capturable: boolean): string {
-  if (!capturable) return "Unavailable";
-  if (value === 0) return "Muted";
-  if (value < NATIVE_PERCENT) return "Quiet";
-  if (value > NATIVE_PERCENT) return "Boost";
+/** Nothing exceeds full scale in compression mode, so there is no heat. */
+function paintTargetTheme(target: number): void {
+  panel.style.setProperty("--fill-a", mixColor(TARGET_PRIMARY_STOPS, target));
+  panel.style.setProperty("--fill-b", mixColor(TARGET_SECONDARY_STOPS, target));
+  panel.style.setProperty("--dim", Math.max(0, 1 - target / MAX_TARGET).toFixed(3));
+  panel.style.setProperty("--heat", "0");
+}
+
+function badgeLabel(state: TabStateView): string {
+  if (!state.capturable) return "Unavailable";
+  if (compressionOn()) {
+    if (!state.active) return "Idle";
+    if (state.intensity === 0) return "Passthrough";
+    return "Leveling";
+  }
+  if (state.percent === 0) return "Muted";
+  if (state.percent < NATIVE_PERCENT) return "Quiet";
+  if (state.percent > NATIVE_PERCENT) return "Boost";
   return "Native";
 }
 
+/* slider domain */
+
+function isGranular(): boolean {
+  return settings.granularity !== "off";
+}
+
+function activeStops(): readonly number[] {
+  if (!isGranular()) return [];
+  const kind = compressionOn() ? "target" : "gain";
+  return stopsFor(kind);
+}
+
+function sliderMax(): number {
+  return compressionOn() ? MAX_TARGET : MAX_PERCENT;
+}
+
+/** Where the anchor value (native gain, or the default target) sits along the track. */
+function anchorRatio(): number {
+  const stops = activeStops();
+  if (stops.length > 0) {
+    const anchor = compressionOn() ? DEFAULT_TARGET : NATIVE_PERCENT;
+    return indexRatio(nearestStopIndex(stops, anchor), stops.length);
+  }
+  return compressionOn()
+    ? DEFAULT_TARGET / MAX_TARGET
+    : positionFromPercent(NATIVE_PERCENT) / MAX_PERCENT;
+}
+
+function configureSliderDomain(): void {
+  const stops = activeStops();
+  sliderWrap.classList.toggle("granular", stops.length > 0);
+  if (stops.length > 0) {
+    slider.min = "0";
+    slider.max = String(stops.length - 1);
+    slider.step = "1";
+    sliderWrap.style.setProperty("--stop-count", String(stops.length));
+  } else {
+    slider.min = "0";
+    slider.max = String(sliderMax());
+    slider.step = "1";
+  }
+  sliderWrap.style.setProperty("--native-ratio", String(anchorRatio()));
+}
+
 function positionRatio(position: number): number {
-  return position / MAX_PERCENT;
+  const stops = activeStops();
+  if (stops.length > 0) return indexRatio(position, stops.length);
+  return position / sliderMax();
+}
+
+/** Slider value for a state: stop index when granular, else gamma/linear position. */
+function positionFor(state: TabStateView): number {
+  const value = compressionOn() ? state.target : state.percent;
+  const stops = activeStops();
+  if (stops.length > 0) return nearestStopIndex(stops, value);
+  return compressionOn() ? value : positionFromPercent(value);
+}
+
+function valueFromPosition(position: number): number {
+  const stops = activeStops();
+  if (stops.length > 0) {
+    const index = Math.min(stops.length - 1, Math.max(0, Math.round(position)));
+    return stops[index]!;
+  }
+  return compressionOn() ? Math.round(position) : percentFromPosition(position);
 }
 
 function setSliderPosition(position: number): void {
-  slider.max = String(MAX_PERCENT);
+  configureSliderDomain();
   slider.value = String(position);
   slider.style.setProperty("--ratio", String(positionRatio(position)));
 }
 
-function readUnit(): VolumeUnit {
-  return localStorage.getItem(UNIT_KEY) === "db" ? "db" : "percent";
+/** Mode-dependent chrome around the slider: knob, tick labels, anchor position. */
+function paintMode(remapSlider = false): void {
+  const compression = compressionOn();
+  sliderWrap.classList.toggle("compression", compression);
+  knobHost.hidden = !compression;
+  readoutLabel.hidden = !compression;
+  configureSliderDomain();
+  if (remapSlider) {
+    setSliderPosition(positionFor(last));
+  } else {
+    slider.style.setProperty("--ratio", String(positionRatio(Number(slider.value))));
+  }
+  paintUnitLabels();
 }
 
-let unit: VolumeUnit = readUnit();
+function paintUnitLabels(): void {
+  const db = unit === "db";
+  if (compressionOn()) {
+    tickMin.textContent = db ? "−∞" : "0";
+    tickNative.textContent = db ? formatTargetDb(DEFAULT_TARGET) : String(DEFAULT_TARGET);
+    tickMax.textContent = db ? formatTargetDb(MAX_TARGET) : String(MAX_TARGET);
+    readoutLabel.textContent = db ? "Target dBFS" : "Target Volume";
+    reset.textContent = db
+      ? `Reset to ${formatTargetDb(DEFAULT_TARGET)} dB`
+      : `Reset to ${DEFAULT_TARGET}%`;
+    slider.setAttribute("aria-label", db ? "Target volume in dBFS" : "Target volume");
+    return;
+  }
+  tickMin.textContent = db ? "−∞" : "0";
+  tickNative.textContent = db ? "0" : "100";
+  tickMax.textContent = db ? `+${Math.round(dbFromPercent(MAX_PERCENT))}` : String(MAX_PERCENT);
+  reset.textContent = db ? "Reset to 0 dB" : "Reset to 100%";
+  slider.setAttribute("aria-label", db ? "Volume in decibels" : "Volume");
+}
 
+/** Paint the unit into every control that shows it. Does not persist. */
 function setUnit(next: VolumeUnit): void {
   unit = next;
-  localStorage.setItem(UNIT_KEY, next);
   unitSwitch.dataset.unit = next;
   unitPercent.setAttribute("aria-pressed", String(next === "percent"));
   unitDb.setAttribute("aria-pressed", String(next === "db"));
-  tickMin.textContent = next === "db" ? "−∞" : "0";
-  tickNative.textContent = next === "db" ? "0" : "100";
-  tickMax.textContent =
-    next === "db" ? `+${Math.round(dbFromPercent(MAX_PERCENT))}` : String(MAX_PERCENT);
-  reset.textContent = next === "db" ? "Reset to 0 dB" : "Reset to 100%";
-  slider.setAttribute("aria-label", next === "db" ? "Volume in decibels" : "Volume");
+  paintUnitLabels();
 }
 
-function paintReadout(percent: number): void {
+function paintReadout(value: number): void {
   if (unit === "db") {
-    readout.innerHTML = `${formatDb(percent)}<span class="unit">dB</span>`;
+    const text = compressionOn() ? formatTargetDb(value) : formatDb(value);
+    readout.innerHTML = `${text}<span class="unit">dB</span>`;
     return;
   }
-  readout.innerHTML = `${percent}<span class="unit">%</span>`;
+  readout.innerHTML = `${value}<span class="unit">%</span>`;
 }
 
 function paint(state: TabStateView, syncSlider = true): void {
-  if (syncSlider) setSliderPosition(positionFromPercent(state.percent));
-  paintReadout(state.percent);
-  badge.textContent = badgeLabel(state.percent, state.capturable);
-  paintTheme(state.capturable ? state.percent : NATIVE_PERCENT);
+  last = state;
+  compressionInput.checked = state.compression;
+  compressionInput.disabled = !state.capturable;
+  paintMode(syncSlider);
+  const compression = compressionOn();
+  const value = compression ? state.target : state.percent;
+  if (syncSlider) {
+    knob.set(state.intensity);
+  }
+  paintReadout(value);
+  badge.textContent = badgeLabel(state);
+  if (compression) paintTargetTheme(state.capturable ? value : DEFAULT_TARGET);
+  else paintGainTheme(state.capturable ? value : NATIVE_PERCENT);
   panel.classList.toggle("off", !state.capturable);
   slider.disabled = !state.capturable;
+  knob.disabled = !state.capturable;
   reset.disabled = !state.capturable;
   limiter.disabled = !state.capturable;
   limiter.checked = state.limiter;
@@ -146,57 +314,159 @@ function paint(state: TabStateView, syncSlider = true): void {
   if (!state.capturable || !state.limiter) setClip(0);
 }
 
-async function send(request: BackgroundRequest): Promise<TabStateView> {
+/* messaging */
+
+/** Resolves undefined if the background closed the port without answering. */
+async function send(request: BackgroundRequest): Promise<TabStateView | undefined> {
   return chrome.runtime.sendMessage(request);
 }
 
-let pending: number | undefined;
-let pendingSync = false;
+type RequestFor = (tabId: number) => BackgroundRequest;
+type Queued = { request: BackgroundRequest; sync: boolean };
+
+const queue: Queued[] = [];
 let sending = false;
 
-async function apply(next: number, syncSlider = false): Promise<void> {
-  pending = next;
-  pendingSync = pendingSync || syncSlider;
+/**
+ * Serialize requests to the background. Rapid input of the same type (slider,
+ * knob) coalesces so only the newest value is sent; a request of a different
+ * type is never dropped, so a mode switch queued behind a slider drag survives.
+ */
+async function apply(build: RequestFor, syncSlider = false): Promise<void> {
+  if (tabId === undefined) return;
+  const request = build(tabId);
+  const tail = queue[queue.length - 1];
+  if (tail && tail.request.type === request.type) {
+    tail.request = request;
+    tail.sync = tail.sync || syncSlider;
+  } else {
+    queue.push({ request, sync: syncSlider });
+  }
   if (sending) return;
   sending = true;
-  while (pending !== undefined && tabId !== undefined) {
-    const value = pending;
-    const sync = pendingSync;
-    pending = undefined;
-    pendingSync = false;
-    const state = await send({
-      target: "background",
-      type: "setGain",
-      tabId,
-      percent: value,
-    });
-    paint(state, sync);
+  try {
+    let next: Queued | undefined;
+    while ((next = queue.shift()) !== undefined) {
+      let state: TabStateView | undefined;
+      try {
+        state = await send(next.request);
+      } catch (err) {
+        // Service worker went away mid-request. Skip this one; the queue stays alive.
+        console.warn("background unreachable", err);
+        continue;
+      }
+      if (state) paint(state, next.sync);
+    }
+  } finally {
+    sending = false;
   }
-  sending = false;
 }
 
 slider.addEventListener("input", () => {
   const position = Number(slider.value);
   slider.style.setProperty("--ratio", String(positionRatio(position)));
-  void apply(percentFromPosition(position));
+  const value = valueFromPosition(position);
+  if (compressionOn()) {
+    void apply((id) => ({ target: "background", type: "setTarget", tabId: id, percent: value }));
+  } else {
+    void apply((id) => ({ target: "background", type: "setGain", tabId: id, percent: value }));
+  }
+});
+
+const knob = new ArcKnob(knobHost, {
+  label: "Leveling intensity",
+  onInput: (value) => {
+    void apply((id) => ({ target: "background", type: "setIntensity", tabId: id, intensity: value }));
+  },
 });
 
 reset.addEventListener("click", () => {
-  void apply(NATIVE_PERCENT, true);
+  if (compressionOn()) {
+    void apply((id) => ({ target: "background", type: "release", tabId: id }), true);
+  } else {
+    void apply(
+      (id) => ({ target: "background", type: "setGain", tabId: id, percent: NATIVE_PERCENT }),
+      true,
+    );
+  }
 });
 
-unitPercent.addEventListener("click", () => {
-  setUnit("percent");
-  paintReadout(snapFromSlider());
+/* settings */
+
+function chooseUnit(next: VolumeUnit): void {
+  setUnit(next);
+  paintReadout(valueFromSlider());
+  void writeSettings({ unit: next });
+}
+
+unitPercent.addEventListener("click", () => chooseUnit("percent"));
+unitDb.addEventListener("click", () => chooseUnit("db"));
+
+compressionInput.addEventListener("change", () => {
+  const enabled = compressionInput.checked;
+  last = { ...last, compression: enabled };
+  paintMode(true);
+  void apply(
+    (id) => ({ target: "background", type: "setCompression", tabId: id, enabled }),
+    true,
+  );
 });
 
-unitDb.addEventListener("click", () => {
-  setUnit("db");
-  paintReadout(snapFromSlider());
+function setGranularityUI(level: Granularity): void {
+  granularitySwitch.dataset.granularity = level;
+  for (const g of GRANULARITY_LEVELS) {
+    granularityButtons[g].setAttribute("aria-pressed", String(g === level));
+  }
+}
+
+function chooseGranularity(level: Granularity): void {
+  if (level === settings.granularity) return;
+  void writeSettings({ granularity: level });
+}
+
+for (const g of GRANULARITY_LEVELS) {
+  granularityButtons[g].addEventListener("click", () => chooseGranularity(g));
+}
+
+/** Snap the active tab to the nearest stop and write audio when granularity changes. */
+function applyGranularity(): void {
+  paintMode(true);
+  if (!isGranular() || !last.capturable || tabId === undefined) return;
+  const value = valueFromSlider();
+  if (compressionOn()) {
+    void apply((id) => ({ target: "background", type: "setTarget", tabId: id, percent: value }));
+  } else {
+    void apply((id) => ({ target: "background", type: "setGain", tabId: id, percent: value }));
+  }
+}
+
+function showSettings(open: boolean): void {
+  settingsToggle.setAttribute("aria-expanded", String(open));
+  settingsToggle.setAttribute("aria-label", open ? "Back" : "Settings");
+  mainView.hidden = open;
+  settingsView.hidden = !open;
+}
+
+settingsToggle.addEventListener("click", () => {
+  showSettings(settingsToggle.getAttribute("aria-expanded") !== "true");
 });
 
-function snapFromSlider(): number {
-  return percentFromPosition(Number(slider.value));
+/** Reflect the persisted settings in the settings view and the mode-dependent main view. */
+function applySettings(next: Settings): void {
+  const granularityChanged = next.granularity !== settings.granularity;
+  settings = next;
+  setGranularityUI(next.granularity);
+  if (next.unit !== unit) {
+    setUnit(next.unit);
+    paintReadout(valueFromSlider());
+  }
+  if (granularityChanged) {
+    applyGranularity();
+  }
+}
+
+function valueFromSlider(): number {
+  return valueFromPosition(Number(slider.value));
 }
 
 limiter.addEventListener("change", () => {
@@ -205,11 +475,16 @@ limiter.addEventListener("change", () => {
     target: "background",
     type: "setLimiter",
     enabled: limiter.checked,
-  }).then((state) => {
-    limiter.checked = state.limiter;
-    if (!state.limiter) setClip(0);
-  });
+  })
+    .then((state) => {
+      if (!state) return;
+      limiter.checked = state.limiter;
+      if (!state.limiter) setClip(0);
+    })
+    .catch((err: unknown) => console.warn("background unreachable", err));
 });
+
+/* limiter clip meter */
 
 const motionOk = !matchMedia("(prefers-reduced-motion: reduce)").matches;
 let clipShown = 0;
@@ -250,8 +525,18 @@ function bumpClip(reduction: number): void {
   if (!clipRaf) clipRaf = requestAnimationFrame(tickClip);
 }
 
-setUnit(unit);
-requestAnimationFrame(() => unitSwitch.classList.add("ready"));
+/* startup */
+
+await migrateLegacyUnit();
+settings = await readSettings();
+setUnit(settings.unit);
+setGranularityUI(settings.granularity);
+configureSliderDomain();
+onSettingsChanged(applySettings);
+requestAnimationFrame(() => {
+  unitSwitch.classList.add("ready");
+  granularitySwitch.classList.add("ready");
+});
 
 chrome.runtime.onMessage.addListener((message: PopupEvent) => {
   if (message?.target !== "popup" || message.type !== "limiterMeter") return;
@@ -262,9 +547,10 @@ chrome.runtime.onMessage.addListener((message: PopupEvent) => {
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 tabId = tab?.id;
 if (tabId === undefined || !isCapturableUrl(tab?.url)) {
-  paint({ percent: NATIVE_PERCENT, capturable: false, limiter: true });
+  paint({ ...UNAVAILABLE, limiter: settings.limiter });
 } else {
-  paint(await send({ target: "background", type: "getState", tabId }));
+  const state = await send({ target: "background", type: "getState", tabId });
+  paint(state ?? { ...UNAVAILABLE, limiter: settings.limiter });
   void chrome.runtime.sendMessage({
     target: "background",
     type: "watchMeter",

@@ -1,12 +1,23 @@
 import {
+  clampIntensity,
+  DEFAULT_INTENSITY,
   isCapturableUrl,
   NATIVE_PERCENT,
+  DEFAULT_TARGET,
   snapPercent,
+  snapTarget,
   type BackgroundRequest,
   type OffscreenRequest,
   type OffscreenTabState,
   type TabStateView,
 } from "./messages.js";
+import {
+  DEFAULT_SETTINGS,
+  onSettingsChanged,
+  readSettings,
+  writeSettings,
+  type Settings,
+} from "./settings.js";
 
 type RestorableState =
   | typeof chrome.windows.WindowState.NORMAL
@@ -25,10 +36,67 @@ type PromotedWindows = Record<string, RestorableState>;
 /** Bumped per window whenever we promote it, so a stale restore loop stops. */
 const promotionGeneration = new Map<number, number>();
 let creatingOffscreen: Promise<void> | null = null;
-let limiterEnabled = true;
 let meterTabId: number | null = null;
 
+/**
+ * Cached copy of chrome.storage.local "settings". The service worker restarts
+ * after idle, so the cache is reloaded on startup and kept fresh by onChanged.
+ */
+let settings: Settings = DEFAULT_SETTINGS;
+const settingsReady: Promise<void> = readSettings().then((loaded) => {
+  settings = loaded;
+});
+
+onSettingsChanged((next) => {
+  const previous = settings;
+  settings = next;
+  if (next.limiter !== previous.limiter) {
+    void (async () => {
+      if (await hasOffscreen()) {
+        await sendOffscreen({ target: "offscreen", type: "setLimiter", enabled: next.limiter });
+      }
+    })();
+  }
+});
+
 const BADGE_COLOR = "#1c1c24";
+const NOT_CAPTURED: OffscreenTabState = {
+  captured: false,
+  percent: NATIVE_PERCENT,
+  target: DEFAULT_TARGET,
+  intensity: DEFAULT_INTENSITY,
+  compression: false,
+};
+
+/**
+ * Compression is per-tab. Captured graphs own the live flag; this set remembers
+ * it for tabs that are Idle after Reset or that have not been captured yet.
+ * chrome.storage.session survives a service-worker restart, not a browser quit.
+ */
+const TAB_COMPRESSION_KEY = "tabCompression";
+let compressedTabs = new Set<number>();
+const compressedTabsReady: Promise<void> = chrome.storage.session
+  .get(TAB_COMPRESSION_KEY)
+  .catch(() => ({}) as Record<string, unknown>)
+  .then((stored) => {
+    const value = stored[TAB_COMPRESSION_KEY];
+    if (!Array.isArray(value)) return;
+    compressedTabs = new Set(value.filter((id): id is number => typeof id === "number"));
+  });
+
+async function persistCompressedTabs(): Promise<void> {
+  await chrome.storage.session
+    .set({ [TAB_COMPRESSION_KEY]: [...compressedTabs] })
+    .catch(() => undefined);
+}
+
+async function setTabCompressed(tabId: number, enabled: boolean): Promise<void> {
+  const had = compressedTabs.has(tabId);
+  if (enabled === had) return;
+  if (enabled) compressedTabs.add(tabId);
+  else compressedTabs.delete(tabId);
+  await persistCompressedTabs();
+}
 
 async function hasOffscreen(): Promise<boolean> {
   const contexts = await chrome.runtime.getContexts({
@@ -58,33 +126,66 @@ async function ensureOffscreen(): Promise<void> {
   await creatingOffscreen;
 }
 
-async function sendOffscreen(message: OffscreenRequest): Promise<{
+type OffscreenResponse = {
   ok?: boolean;
   captured?: boolean;
   percent?: number;
+  target?: number;
+  intensity?: number;
+  compression?: boolean;
   empty?: boolean;
+  states?: Array<OffscreenTabState & { tabId: number }>;
   error?: string;
-}> {
+};
+
+async function sendOffscreen(message: OffscreenRequest): Promise<OffscreenResponse> {
   return chrome.runtime.sendMessage(message);
+}
+
+function idleState(tabId: number): OffscreenTabState {
+  return { ...NOT_CAPTURED, compression: compressedTabs.has(tabId) };
 }
 
 /** The offscreen document owns the audio graph, so it is the source of truth. */
 async function offscreenState(tabId: number): Promise<OffscreenTabState> {
-  if (!(await hasOffscreen())) return { captured: false, percent: NATIVE_PERCENT };
+  if (!(await hasOffscreen())) return idleState(tabId);
   const result = await sendOffscreen({ target: "offscreen", type: "getState", tabId });
-  if (!result?.captured) return { captured: false, percent: NATIVE_PERCENT };
-  return { captured: true, percent: result.percent ?? NATIVE_PERCENT };
+  if (!result?.captured) return idleState(tabId);
+  const compression = result.compression ?? false;
+  // The live graph wins in both directions, so a missed response can never
+  // leave the remembered flag disagreeing with what is actually playing.
+  if (compression !== compressedTabs.has(tabId)) {
+    void setTabCompressed(tabId, compression);
+  }
+  return {
+    captured: true,
+    percent: result.percent ?? NATIVE_PERCENT,
+    target: result.target ?? DEFAULT_TARGET,
+    intensity: result.intensity ?? DEFAULT_INTENSITY,
+    compression,
+  };
 }
 
-async function setBadge(tabId: number, percent: number): Promise<void> {
-  if (percent === NATIVE_PERCENT) {
+/**
+ * Gain mode shows the bare percent. Compression mode shows the target, 0 to 100.
+ * Nothing is shown for a tab we don't hold.
+ */
+async function setBadge(tabId: number, state: OffscreenTabState): Promise<void> {
+  const text = !state.captured
+    ? ""
+    : state.compression
+      ? String(state.target)
+      : state.percent === NATIVE_PERCENT
+        ? ""
+        : String(state.percent);
+  if (text === "") {
     await chrome.action.setBadgeText({ text: "", tabId }).catch(() => undefined);
     return;
   }
   await chrome.action
     .setBadgeBackgroundColor({ color: BADGE_COLOR, tabId })
     .catch(() => undefined);
-  await chrome.action.setBadgeText({ text: String(percent), tabId }).catch(() => undefined);
+  await chrome.action.setBadgeText({ text, tabId }).catch(() => undefined);
 }
 
 async function detachTab(tabId: number): Promise<void> {
@@ -100,7 +201,7 @@ async function closeOffscreenIfEmpty(): Promise<void> {
   }
 }
 
-async function capture(tabId: number, percent: number): Promise<void> {
+async function capture(tabId: number, state: OffscreenTabState): Promise<void> {
   await ensureOffscreen();
   const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
   const result = await sendOffscreen({
@@ -108,8 +209,11 @@ async function capture(tabId: number, percent: number): Promise<void> {
     type: "attach",
     tabId,
     streamId,
-    percent,
-    limiter: limiterEnabled,
+    percent: state.percent,
+    targetPercent: state.target,
+    intensity: state.intensity,
+    limiter: settings.limiter,
+    compression: state.compression,
   });
   if (!result?.ok) {
     throw new Error(result?.error ?? "attach failed");
@@ -119,10 +223,15 @@ async function capture(tabId: number, percent: number): Promise<void> {
   }
 }
 
-async function fallBackNative(tabId: number): Promise<void> {
+/**
+ * Drop the capture for a tab and clear its badge. A failed detach is ignored:
+ * it only fails when the offscreen document is already gone, and the stream
+ * died with it, so Idle is the true state either way.
+ */
+async function dropCapture(tabId: number): Promise<void> {
   await detachTab(tabId).catch(() => undefined);
   await closeOffscreenIfEmpty();
-  await setBadge(tabId, NATIVE_PERCENT);
+  await setBadge(tabId, NOT_CAPTURED);
 }
 
 async function tabCapturable(tabId: number): Promise<boolean> {
@@ -131,17 +240,24 @@ async function tabCapturable(tabId: number): Promise<boolean> {
   return isCapturableUrl(tab.url);
 }
 
-function view(percent: number, capturable: boolean): TabStateView {
-  return { percent, capturable, limiter: limiterEnabled };
+function view(state: OffscreenTabState, capturable: boolean): TabStateView {
+  return {
+    percent: state.percent,
+    target: state.target,
+    intensity: state.intensity,
+    active: state.captured,
+    compression: state.compression,
+    capturable,
+    limiter: settings.limiter,
+  };
 }
 
 async function getState(tabId: number): Promise<TabStateView> {
   const capturable = await tabCapturable(tabId);
   if (!capturable) {
-    return view(NATIVE_PERCENT, false);
+    return view(NOT_CAPTURED, false);
   }
-  const state = await offscreenState(tabId);
-  return view(state.percent, true);
+  return view(await offscreenState(tabId), true);
 }
 
 async function watchMeter(tabId: number | null): Promise<void> {
@@ -151,48 +267,126 @@ async function watchMeter(tabId: number | null): Promise<void> {
   }
 }
 
+/** Persists the flag; the onSettingsChanged listener pushes it to the offscreen graph. */
 async function setLimiter(enabled: boolean): Promise<TabStateView> {
-  limiterEnabled = enabled;
-  if (await hasOffscreen()) {
-    await sendOffscreen({ target: "offscreen", type: "setLimiter", enabled });
+  await writeSettings({ limiter: enabled });
+  return { ...view(NOT_CAPTURED, true), limiter: enabled };
+}
+
+async function release(tabId: number): Promise<TabStateView> {
+  const capturable = await tabCapturable(tabId);
+  await dropCapture(tabId);
+  return view(idleState(tabId), capturable);
+}
+
+/**
+ * Send one parameter to an attached tab, or capture it first. `update`
+ * mutates the state that a fresh capture would start from.
+ */
+async function pushToTab(
+  tabId: number,
+  update: (state: OffscreenTabState) => OffscreenTabState,
+  message: (state: OffscreenTabState) => OffscreenRequest,
+): Promise<TabStateView> {
+  try {
+    const current = await offscreenState(tabId);
+    const next = update(current);
+    if (current.captured) {
+      const result = await sendOffscreen(message(next));
+      if (!result?.ok) throw new Error(result?.error ?? "offscreen update failed");
+    } else {
+      await capture(tabId, { ...next, captured: true });
+    }
+    const captured = { ...next, captured: true };
+    await setBadge(tabId, captured);
+    return view(captured, true);
+  } catch {
+    await dropCapture(tabId);
+    return view(idleState(tabId), true);
   }
-  return view(NATIVE_PERCENT, true);
 }
 
 async function setGain(tabId: number, percent: number): Promise<TabStateView> {
   const capturable = await tabCapturable(tabId);
   if (!capturable) {
-    return view(NATIVE_PERCENT, false);
+    return view(NOT_CAPTURED, false);
   }
-
   const snapped = snapPercent(percent);
 
-  if (snapped === NATIVE_PERCENT) {
-    await detachTab(tabId);
-    await closeOffscreenIfEmpty();
-    await setBadge(tabId, NATIVE_PERCENT);
-    return view(NATIVE_PERCENT, true);
+  // Native is the do-nothing point in gain mode; drop the capture.
+  const current = await offscreenState(tabId);
+  if (snapped === NATIVE_PERCENT && !current.compression) {
+    return release(tabId);
   }
 
-  try {
-    const current = await offscreenState(tabId);
-    if (current.captured) {
-      const result = await sendOffscreen({
-        target: "offscreen",
-        type: "setGain",
-        tabId,
-        percent: snapped,
-      });
-      if (!result?.ok) throw new Error(result?.error ?? "setGain failed");
-    } else {
-      await capture(tabId, snapped);
-    }
-    await setBadge(tabId, snapped);
-    return view(snapped, true);
-  } catch {
-    await fallBackNative(tabId);
-    return view(NATIVE_PERCENT, true);
+  return pushToTab(
+    tabId,
+    (state) => ({ ...state, percent: snapped }),
+    () => ({ target: "offscreen", type: "setGain", tabId, percent: snapped }),
+  );
+}
+
+/** Compression mode: touching the target attaches; only Reset detaches. */
+async function setTarget(tabId: number, percent: number): Promise<TabStateView> {
+  const capturable = await tabCapturable(tabId);
+  if (!capturable) {
+    return view(NOT_CAPTURED, false);
   }
+  const snapped = snapTarget(percent);
+  return pushToTab(
+    tabId,
+    (state) => ({ ...state, target: snapped }),
+    () => ({ target: "offscreen", type: "setTarget", tabId, percent: snapped }),
+  );
+}
+
+async function setIntensity(tabId: number, intensity: number): Promise<TabStateView> {
+  const capturable = await tabCapturable(tabId);
+  if (!capturable) {
+    return view(NOT_CAPTURED, false);
+  }
+  const clamped = clampIntensity(intensity);
+  return pushToTab(
+    tabId,
+    (state) => ({ ...state, intensity: clamped }),
+    () => ({ target: "offscreen", type: "setIntensity", tabId, intensity: clamped }),
+  );
+}
+
+/**
+ * Per-tab mode switch. Enabling compression on an uncaptured tab stays Idle
+ * until the target is touched. Disabling it at native gain releases the tab;
+ * any other retained gain stays captured and the badge is redrawn.
+ */
+async function setCompression(tabId: number, enabled: boolean): Promise<TabStateView> {
+  const capturable = await tabCapturable(tabId);
+  if (!capturable) {
+    return view(NOT_CAPTURED, false);
+  }
+  // Read before flipping the flag: offscreenState re-syncs the flag from the live graph.
+  const current = await offscreenState(tabId);
+  await setTabCompressed(tabId, enabled);
+  if (!current.captured) {
+    return view(idleState(tabId), true);
+  }
+  if (!enabled && current.percent === NATIVE_PERCENT) {
+    // Not release(): capturability was already checked above.
+    await dropCapture(tabId);
+    return view(idleState(tabId), true);
+  }
+  const result = await sendOffscreen({
+    target: "offscreen",
+    type: "setCompression",
+    tabId,
+    enabled,
+  });
+  if (!result?.ok) {
+    await dropCapture(tabId);
+    return view(idleState(tabId), true);
+  }
+  const next = { ...current, captured: true, compression: enabled };
+  await setBadge(tabId, next);
+  return view(next, true);
 }
 
 async function recapture(tabId: number): Promise<void> {
@@ -200,31 +394,47 @@ async function recapture(tabId: number): Promise<void> {
   if (!state.captured) return;
   try {
     await detachTab(tabId);
-    await capture(tabId, state.percent);
-    await setBadge(tabId, state.percent);
+    await capture(tabId, state);
+    await setBadge(tabId, state);
   } catch {
-    await fallBackNative(tabId);
+    await dropCapture(tabId);
   }
 }
 
 chrome.runtime.onMessage.addListener((message: BackgroundRequest, _sender, sendResponse) => {
   if (!message || message.target !== "background") return;
-  const task =
-    message.type === "getState"
-      ? getState(message.tabId)
-      : message.type === "setLimiter"
-        ? setLimiter(message.enabled)
-        : message.type === "watchMeter"
-          ? watchMeter(message.tabId)
-          : message.type === "unwatchMeter"
-            ? watchMeter(null)
-            : setGain(message.tabId, message.percent);
-  void task.then(sendResponse);
+  void Promise.all([settingsReady, compressedTabsReady])
+    .then(() => dispatch(message))
+    .then(sendResponse);
   return true;
 });
 
+async function dispatch(message: BackgroundRequest): Promise<unknown> {
+  switch (message.type) {
+    case "getState":
+      return getState(message.tabId);
+    case "setLimiter":
+      return setLimiter(message.enabled);
+    case "setCompression":
+      return setCompression(message.tabId, message.enabled);
+    case "watchMeter":
+      return watchMeter(message.tabId);
+    case "unwatchMeter":
+      return watchMeter(null);
+    case "setGain":
+      return setGain(message.tabId, message.percent);
+    case "setTarget":
+      return setTarget(message.tabId, message.percent);
+    case "setIntensity":
+      return setIntensity(message.tabId, message.intensity);
+    case "release":
+      return release(message.tabId);
+  }
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   needsRecapture.delete(tabId);
+  void setTabCompressed(tabId, false);
   void (async () => {
     await detachTab(tabId);
     await closeOffscreenIfEmpty();
