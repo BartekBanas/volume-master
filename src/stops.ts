@@ -4,7 +4,7 @@ export const GAIN_STOPS: readonly number[] = [
 ];
 
 export const TARGET_STOPS: readonly number[] = [
-  0, 5, 10, 15, 20, 25, 35, 50, 60, 75, 85, 100,
+  0, 5, 10, 15, 20, 25, 35, 42, 50, 60, 75, 85, 100,
 ];
 
 export function stopsFor(mode: "gain" | "target"): readonly number[] {

@@ -24,9 +24,11 @@ tab, off by default.
 _Avoid_: auto mode, normalization, limiter
 
 **Target Volume**:
-The RMS audio level the extension aims for, measured as a percentage of
-full-scale RMS. 100% corresponds to 0 dBFS RMS. Unlike Volume, it cannot exceed
-100%.
+The RMS audio level the extension aims for. Units follow the global setting:
+percent of full-scale RMS, or dBFS. 100% is 0 dBFS RMS. Ranges from mute
+(slider at 0) to 0 dBFS (slider at max). The slider uses a square taper, so
+quiet values move faster than a dB-linear scale and loud values move slower.
+Unlike Volume, it cannot exceed 0 dBFS / 100%.
 _Avoid_: target gain, target level, loudness
 
 **Intensity**:
