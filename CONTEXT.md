@@ -2,10 +2,21 @@
 
 ## Language
 
+**Bypassed**:
+A per-tab state meaning Volume Master is not capturing that tab's audio. A tab
+is captured exactly when Bypassed is off, even at 100% Volume. Default on.
+Independent of Gain mode and Compression mode. Shown and toggled by the header
+chip; on is the filled chip plus a cool shade over the popup. Moving the slider
+or knob, or switching Compression mode, turns it off. Reset restores defaults
+without changing it. A Bypassed tab keeps its last values and re-applies them
+when Bypassed turns off.
+_Avoid_: Bypass, Idle, Passthrough, Native (for this state)
+
 **Native**:
 A tab's unaltered audio level in Gain mode, corresponding to exactly 100% Volume.
-Compression mode has no Native setting.
-_Avoid_: default, normal, 1x
+Compression mode has no Native setting. Native is not Bypassed: a tab can be at
+100% Volume with Bypassed off and still be captured.
+_Avoid_: default, normal, 1x, Bypass
 
 **Volume**:
 A gain multiplier applied to a tab, where 100% is native and 2000% is the
