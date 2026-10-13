@@ -313,7 +313,7 @@ main.off .badge {
 .slider-wrap.compression .controls {
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: var(--knob-gap);
-  align-items: center;
+  align-items: end;
 }
 
 .slider-column {
@@ -368,12 +368,30 @@ main.off .badge {
   box-shadow: 0 0 4px color-mix(in srgb, var(--fill-a) 25%, transparent);
 }
 
-#knob[hidden] {
+.knob-column {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+
+.knob-column[hidden] {
   display: none;
 }
 
-#knob:not([hidden]) {
-  align-self: center;
+.knob-label {
+  height: 16px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  text-align: center;
+  user-select: none;
+  transition: color 0.15s var(--ease);
+}
+
+.knob-column:hover .knob-label,
+.knob-column:has(.arc-knob.dragging) .knob-label,
+.knob-column:has(.arc-knob:focus-visible) .knob-label {
+  color: var(--text);
 }
 
 input[type="range"] {
