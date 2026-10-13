@@ -5,7 +5,6 @@ import {
   NATIVE_PERCENT,
   DEFAULT_TARGET,
   dbFromTarget,
-  percentFromTarget,
   snapPercent,
   snapTarget,
   type BackgroundRequest,
@@ -173,7 +172,7 @@ async function offscreenState(tabId: number): Promise<OffscreenTabState> {
 
 /** Compression target for the badge. Follows the Units setting; mute is −∞ or 0. */
 function targetBadge(position: number): string {
-  if (settings.unit === "percent") return String(percentFromTarget(position));
+  if (settings.unit === "percent") return String(snapTarget(position));
   const db = dbFromTarget(position);
   return Number.isFinite(db) ? String(Math.round(db)) : "-∞";
 }

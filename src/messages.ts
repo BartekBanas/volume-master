@@ -5,20 +5,19 @@ export const NATIVE_POSITION_RATIO = 1 / 3;
 export const NATIVE_POSITION = Math.round(MAX_PERCENT * NATIVE_POSITION_RATIO);
 
 /**
- * Compression-mode target is a slider position 0..MAX_TARGET. Amplitude follows
- * a power taper: RMS = (position / MAX) ** TARGET_GAMMA. Gamma is fitted so
- * DEFAULT_TARGET is exactly DEFAULT_TARGET_DB; it stays close to a square
- * taper, so quiet values move faster than dB-linear and loud values slower.
- * 0 mutes; MAX is 0 dBFS RMS. Not "native": that word means unity gain, which
- * has no counterpart in compression mode.
+ * Compression-mode target is a slider position 0..MAX_TARGET. Percent mode
+ * shows that position. Amplitude follows a power taper:
+ * RMS = (position / MAX) ** TARGET_GAMMA, fitted so DEFAULT_TARGET is exactly
+ * DEFAULT_TARGET_DB. 0 mutes; MAX is 0 dBFS RMS. Not "native": that word means
+ * unity gain, which has no counterpart in compression mode.
  */
 /** Compression-mode maximum target position; 100 is 0 dBFS RMS. */
 export const MAX_TARGET = 100;
-/** Compression-mode default target position. */
-export const DEFAULT_TARGET = 42;
+/** Compression-mode default target position; 50% on the track. */
+export const DEFAULT_TARGET = 50;
 /** Exact RMS dBFS at DEFAULT_TARGET. */
 export const DEFAULT_TARGET_DB = -15;
-/** Maps slider position to linear RMS. Fitted so position 42 is -15 dBFS. */
+/** Maps slider position to linear RMS. Fitted so the midpoint is -15 dBFS. */
 export const TARGET_GAMMA =
   Math.log(10 ** (DEFAULT_TARGET_DB / 20)) / Math.log(DEFAULT_TARGET / MAX_TARGET);
 /** Leveling strength 0..1; what a tab uses until its knob is touched. */
@@ -163,11 +162,6 @@ export function targetToRms(position: number): number {
   const p = snapTarget(position);
   if (p <= 0) return 0;
   return (p / MAX_TARGET) ** TARGET_GAMMA;
-}
-
-/** Percent of full-scale RMS from a compression target position. 100 is 0 dBFS. */
-export function percentFromTarget(position: number): number {
-  return Math.min(MAX_TARGET, Math.max(0, Math.round(targetToRms(position) * MAX_TARGET)));
 }
 
 export function clampIntensity(raw: number): number {

@@ -9,7 +9,6 @@ import {
   NATIVE_PERCENT,
   DEFAULT_TARGET,
   percentFromPosition,
-  percentFromTarget,
   positionFromPercent,
   type BackgroundRequest,
   type PopupEvent,
@@ -257,14 +256,13 @@ function paintMode(remapSlider = false): void {
 function paintUnitLabels(): void {
   const db = unit === "db";
   if (compressionOn()) {
-    const defaultPercent = percentFromTarget(DEFAULT_TARGET);
     tickMin.textContent = db ? "−∞" : "0";
-    tickNative.textContent = db ? formatTargetDb(DEFAULT_TARGET) : String(defaultPercent);
+    tickNative.textContent = db ? formatTargetDb(DEFAULT_TARGET) : String(DEFAULT_TARGET);
     tickMax.textContent = db ? formatTargetDb(MAX_TARGET) : String(MAX_TARGET);
     readoutLabel.textContent = db ? "Target dBFS" : "Target Volume";
     reset.textContent = db
       ? `Reset to ${formatTargetDb(DEFAULT_TARGET)} dB`
-      : `Reset to ${defaultPercent}%`;
+      : `Reset to ${DEFAULT_TARGET}%`;
     slider.setAttribute("aria-label", db ? "Target volume in dBFS" : "Target volume");
     return;
   }
@@ -290,8 +288,7 @@ function paintReadout(value: number): void {
     readout.innerHTML = `${text}<span class="unit">dB</span>`;
     return;
   }
-  const shown = compressionOn() ? percentFromTarget(value) : value;
-  readout.innerHTML = `${shown}<span class="unit">%</span>`;
+  readout.innerHTML = `${value}<span class="unit">%</span>`;
 }
 
 function paint(state: TabStateView, syncSlider = true): void {
