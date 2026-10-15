@@ -1,7 +1,7 @@
 {
   "name": "volume-master",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Adjust volume up to 2000% with built in limiter.",
   "scripts": {
     "build": "tsc && tsx scripts/copy.ts",
