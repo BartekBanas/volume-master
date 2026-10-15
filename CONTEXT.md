@@ -6,11 +6,11 @@
 A per-tab state meaning Volume Master is not capturing that tab's audio. A tab
 is captured exactly when Bypassed is off, even at 100% Volume. Default on.
 Independent of Gain mode and Compression mode. Shown and toggled by the header
-chip; on is the filled chip plus the slider, knob, and footer dimmed the same way as when the tab is unavailable. Moving the slider
+chip, labelled "Bypass" because it is a toggle button named for its action; on is the filled chip plus the slider, knob, and footer dimmed the same way as when the tab is unavailable. Moving the slider
 or knob, or switching Compression mode, turns it off. Reset restores defaults
 without changing it. A Bypassed tab keeps its last values and re-applies them
 when Bypassed turns off.
-_Avoid_: Bypass, Idle, Passthrough, Native (for this state)
+_Avoid_: Bypass (except as the chip label), Idle, Passthrough, Native (for this state)
 
 **Native**:
 A tab's unaltered audio level in Gain mode, corresponding to exactly 100% Volume.
