@@ -28,8 +28,9 @@ export type BackgroundRequest =
   | { target: "background"; type: "setGain"; tabId: number; percent: number }
   | { target: "background"; type: "setTarget"; tabId: number; percent: number }
   | { target: "background"; type: "setIntensity"; tabId: number; intensity: number }
-  /** Compression-mode Reset: drop the tab's capture regardless of its values. */
-  | { target: "background"; type: "release"; tabId: number }
+  /** Restore the current mode's defaults. Never changes Bypassed. */
+  | { target: "background"; type: "reset"; tabId: number }
+  | { target: "background"; type: "setBypassed"; tabId: number; bypassed: boolean }
   | { target: "background"; type: "setLimiter"; enabled: boolean }
   | { target: "background"; type: "setCompression"; tabId: number; enabled: boolean }
   | { target: "background"; type: "watchMeter"; tabId: number }
@@ -46,20 +47,22 @@ export type TabStateView = {
   percent: number;
   target: number;
   intensity: number;
-  /** Whether the tab's audio is currently captured. */
-  active: boolean;
+  /** True while the tab's audio is not captured. */
+  bypassed: boolean;
   compression: boolean;
   capturable: boolean;
   limiter: boolean;
 };
 
-export type OffscreenTabState = {
-  captured: boolean;
+/** A tab's last applied values, kept while it is Bypassed. */
+export type TabSettings = {
   percent: number;
   target: number;
   intensity: number;
   compression: boolean;
 };
+
+export type OffscreenTabState = TabSettings & { captured: boolean };
 
 export type OffscreenRequest =
   | {
