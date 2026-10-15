@@ -4,6 +4,7 @@ import {
   isCapturableUrl,
   NATIVE_PERCENT,
   DEFAULT_TARGET,
+  dbFromTarget,
   snapPercent,
   snapTarget,
   type BackgroundRequest,
@@ -56,6 +57,9 @@ onSettingsChanged((next) => {
         await sendOffscreen({ target: "offscreen", type: "setLimiter", enabled: next.limiter });
       }
     })();
+  }
+  if (next.unit !== previous.unit) {
+    void refreshBadges();
   }
 });
 
@@ -166,15 +170,22 @@ async function offscreenState(tabId: number): Promise<OffscreenTabState> {
   };
 }
 
+/** Compression target for the badge. Follows the Units setting; mute is −∞ or 0. */
+function targetBadge(position: number): string {
+  if (settings.unit === "percent") return String(snapTarget(position));
+  const db = dbFromTarget(position);
+  return Number.isFinite(db) ? String(Math.round(db)) : "-∞";
+}
+
 /**
- * Gain mode shows the bare percent. Compression mode shows the target, 0 to 100.
- * Nothing is shown for a tab we don't hold.
+ * Gain mode shows the bare percent. Compression mode shows the target in the
+ * current unit. Nothing is shown for a tab we don't hold.
  */
 async function setBadge(tabId: number, state: OffscreenTabState): Promise<void> {
   const text = !state.captured
     ? ""
     : state.compression
-      ? String(state.target)
+      ? targetBadge(state.target)
       : state.percent === NATIVE_PERCENT
         ? ""
         : String(state.percent);
@@ -186,6 +197,14 @@ async function setBadge(tabId: number, state: OffscreenTabState): Promise<void> 
     .setBadgeBackgroundColor({ color: BADGE_COLOR, tabId })
     .catch(() => undefined);
   await chrome.action.setBadgeText({ text, tabId }).catch(() => undefined);
+}
+
+async function refreshBadges(): Promise<void> {
+  if (!(await hasOffscreen())) return;
+  const result = await sendOffscreen({ target: "offscreen", type: "listStates" });
+  for (const state of result.states ?? []) {
+    await setBadge(state.tabId, state);
+  }
 }
 
 async function detachTab(tabId: number): Promise<void> {

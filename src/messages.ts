@@ -5,12 +5,21 @@ export const NATIVE_POSITION_RATIO = 1 / 3;
 export const NATIVE_POSITION = Math.round(MAX_PERCENT * NATIVE_POSITION_RATIO);
 
 /**
- * Compression-mode default target, in percent of full-scale RMS. Not "native":
- * that word means unity gain, which has no counterpart in compression mode.
+ * Compression-mode target is a slider position 0..MAX_TARGET. Percent mode
+ * shows that position. Amplitude follows a power taper:
+ * RMS = (position / MAX) ** TARGET_GAMMA, fitted so DEFAULT_TARGET is exactly
+ * DEFAULT_TARGET_DB. 0 mutes; MAX is 0 dBFS RMS. Not "native": that word means
+ * unity gain, which has no counterpart in compression mode.
  */
-export const DEFAULT_TARGET = 50;
-/** Compression-mode maximum target; 100% is 0 dBFS RMS. */
+/** Compression-mode maximum target position; 100 is 0 dBFS RMS. */
 export const MAX_TARGET = 100;
+/** Compression-mode default target position; 50% on the track. */
+export const DEFAULT_TARGET = 50;
+/** Exact RMS dBFS at DEFAULT_TARGET. */
+export const DEFAULT_TARGET_DB = -15;
+/** Maps slider position to linear RMS. Fitted so the midpoint is -15 dBFS. */
+export const TARGET_GAMMA =
+  Math.log(10 ** (DEFAULT_TARGET_DB / 20)) / Math.log(DEFAULT_TARGET / MAX_TARGET);
 /** Leveling strength 0..1; what a tab uses until its knob is touched. */
 export const DEFAULT_INTENSITY = 0.5;
 
@@ -148,9 +157,11 @@ export function snapTarget(raw: number): number {
   return Math.min(MAX_TARGET, Math.max(0, Math.round(raw)));
 }
 
-/** Linear RMS amplitude the leveler aims for; 100% target is 0 dBFS. */
-export function targetToRms(percent: number): number {
-  return snapTarget(percent) / MAX_TARGET;
+/** Linear RMS amplitude the leveler aims for. Position 0 gives 0, which mutes. */
+export function targetToRms(position: number): number {
+  const p = snapTarget(position);
+  if (p <= 0) return 0;
+  return (p / MAX_TARGET) ** TARGET_GAMMA;
 }
 
 export function clampIntensity(raw: number): number {
@@ -167,11 +178,11 @@ export function dbFromPercent(percent: number): number {
   return 20 * Math.log10(p / NATIVE_PERCENT);
 }
 
-/** RMS dBFS from compression target percent. 100% is 0 dBFS, 0% is −∞. */
-export function dbFromTarget(percent: number): number {
-  const p = snapTarget(percent);
-  if (p <= 0) return Number.NEGATIVE_INFINITY;
-  return 20 * Math.log10(p / MAX_TARGET);
+/** RMS dBFS from a compression target position. MAX is 0 dBFS, 0 is −∞ (mute). */
+export function dbFromTarget(position: number): number {
+  const rms = targetToRms(position);
+  if (rms <= 0) return Number.NEGATIVE_INFINITY;
+  return 20 * Math.log10(rms);
 }
 
 function formatDbValue(db: number): string {

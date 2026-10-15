@@ -33,6 +33,7 @@ import {
 
 const slider = document.querySelector("#slider") as HTMLInputElement;
 const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
+const knobColumn = document.querySelector("#knob-column") as HTMLElement;
 const knobHost = document.querySelector("#knob") as HTMLElement;
 const readout = document.querySelector("#readout") as HTMLParagraphElement;
 const readoutLabel = document.querySelector("#readout-label") as HTMLParagraphElement;
@@ -241,7 +242,7 @@ function setSliderPosition(position: number): void {
 function paintMode(remapSlider = false): void {
   const compression = compressionOn();
   sliderWrap.classList.toggle("compression", compression);
-  knobHost.hidden = !compression;
+  knobColumn.hidden = !compression;
   readoutLabel.hidden = !compression;
   configureSliderDomain();
   if (remapSlider) {
