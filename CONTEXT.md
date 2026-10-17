@@ -2,10 +2,21 @@
 
 ## Language
 
+**Bypassed**:
+A per-tab state meaning Volume Master is not capturing that tab's audio. A tab
+is captured exactly when Bypassed is off, even at 100% Volume. Default on.
+Independent of Gain mode and Compression mode. Shown and toggled by the header
+chip, labelled "Bypass" because it is a toggle button named for its action; on is the filled chip plus the slider, knob, and footer dimmed the same way as when the tab is unavailable. Moving the slider
+or knob, or switching Compression mode, turns it off. Reset restores defaults
+without changing it. A Bypassed tab keeps its last values and re-applies them
+when Bypassed turns off.
+_Avoid_: Bypass (except as the chip label), Idle, Passthrough, Native (for this state)
+
 **Native**:
 A tab's unaltered audio level in Gain mode, corresponding to exactly 100% Volume.
-Compression mode has no Native setting.
-_Avoid_: default, normal, 1x
+Compression mode has no Native setting. Native is not Bypassed: a tab can be at
+100% Volume with Bypassed off and still be captured.
+_Avoid_: default, normal, 1x, Bypass
 
 **Volume**:
 A gain multiplier applied to a tab, where 100% is native and 2000% is the
@@ -24,9 +35,11 @@ tab, off by default.
 _Avoid_: auto mode, normalization, limiter
 
 **Target Volume**:
-The RMS audio level the extension aims for, measured as a percentage of
-full-scale RMS. 100% corresponds to 0 dBFS RMS. Unlike Volume, it cannot exceed
-100%.
+The RMS audio level the extension aims for. In dB, 0 is full scale and the
+default is −15 dBFS. In percent, the number is the slider position: 0 mute, 50
+the default, 100 full scale. Percent is not linear RMS; 50% is −15 dBFS, not
+−6. Ranges from mute (slider at 0) to 0 dBFS (slider at max). Unlike Volume, it
+cannot exceed 0 dBFS / 100%.
 _Avoid_: target gain, target level, loudness
 
 **Intensity**:

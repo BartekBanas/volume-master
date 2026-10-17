@@ -19,7 +19,7 @@ type Graph = {
   limiter: AudioWorkletNode | null;
   /** Gain-mode volume. Retained while compression pins the GainNode at 1.0. */
   percent: number;
-  /** Compression-mode target in percent of the reference loudness. */
+  /** Compression-mode target as a square-taper slider position; see targetToRms. */
   target: number;
   intensity: number;
   compression: boolean;

@@ -33,6 +33,7 @@ import {
 
 const slider = document.querySelector("#slider") as HTMLInputElement;
 const sliderWrap = document.querySelector(".slider-wrap") as HTMLElement;
+const knobColumn = document.querySelector("#knob-column") as HTMLElement;
 const knobHost = document.querySelector("#knob") as HTMLElement;
 const readout = document.querySelector("#readout") as HTMLParagraphElement;
 const readoutLabel = document.querySelector("#readout-label") as HTMLParagraphElement;
@@ -40,7 +41,7 @@ const reset = document.querySelector("#reset") as HTMLButtonElement;
 const limiter = document.querySelector("#limiter") as HTMLInputElement;
 const limiterChip = document.querySelector(".limiter") as HTMLElement;
 const note = document.querySelector("#note") as HTMLParagraphElement;
-const badge = document.querySelector("#badge") as HTMLSpanElement;
+const bypassedChip = document.querySelector("#bypassed") as HTMLButtonElement;
 const panel = document.querySelector("main") as HTMLElement;
 const unitSwitch = document.querySelector(".unit-switch") as HTMLElement;
 const unitPercent = document.querySelector("#unit-percent") as HTMLButtonElement;
@@ -67,7 +68,7 @@ const UNAVAILABLE: TabStateView = {
   percent: NATIVE_PERCENT,
   target: DEFAULT_TARGET,
   intensity: DEFAULT_INTENSITY,
-  active: false,
+  bypassed: true,
   compression: false,
   capturable: false,
   limiter: true,
@@ -151,19 +152,6 @@ function paintTargetTheme(target: number): void {
   panel.style.setProperty("--heat", "0");
 }
 
-function badgeLabel(state: TabStateView): string {
-  if (!state.capturable) return "Unavailable";
-  if (compressionOn()) {
-    if (!state.active) return "Idle";
-    if (state.intensity === 0) return "Passthrough";
-    return "Leveling";
-  }
-  if (state.percent === 0) return "Muted";
-  if (state.percent < NATIVE_PERCENT) return "Quiet";
-  if (state.percent > NATIVE_PERCENT) return "Boost";
-  return "Native";
-}
-
 /* slider domain */
 
 function isGranular(): boolean {
@@ -241,7 +229,7 @@ function setSliderPosition(position: number): void {
 function paintMode(remapSlider = false): void {
   const compression = compressionOn();
   sliderWrap.classList.toggle("compression", compression);
-  knobHost.hidden = !compression;
+  knobColumn.hidden = !compression;
   readoutLabel.hidden = !compression;
   configureSliderDomain();
   if (remapSlider) {
@@ -301,10 +289,12 @@ function paint(state: TabStateView, syncSlider = true): void {
     knob.set(state.intensity);
   }
   paintReadout(value);
-  badge.textContent = badgeLabel(state);
+  bypassedChip.setAttribute("aria-pressed", String(state.bypassed));
+  bypassedChip.disabled = !state.capturable;
   if (compression) paintTargetTheme(state.capturable ? value : DEFAULT_TARGET);
   else paintGainTheme(state.capturable ? value : NATIVE_PERCENT);
   panel.classList.toggle("off", !state.capturable);
+  panel.classList.toggle("bypassed", state.capturable && state.bypassed);
   slider.disabled = !state.capturable;
   knob.disabled = !state.capturable;
   reset.disabled = !state.capturable;
@@ -381,14 +371,12 @@ const knob = new ArcKnob(knobHost, {
 });
 
 reset.addEventListener("click", () => {
-  if (compressionOn()) {
-    void apply((id) => ({ target: "background", type: "release", tabId: id }), true);
-  } else {
-    void apply(
-      (id) => ({ target: "background", type: "setGain", tabId: id, percent: NATIVE_PERCENT }),
-      true,
-    );
-  }
+  void apply((id) => ({ target: "background", type: "reset", tabId: id }), true);
+});
+
+bypassedChip.addEventListener("click", () => {
+  const bypassed = !last.bypassed;
+  void apply((id) => ({ target: "background", type: "setBypassed", tabId: id, bypassed }), true);
 });
 
 /* settings */
@@ -428,10 +416,10 @@ for (const g of GRANULARITY_LEVELS) {
   granularityButtons[g].addEventListener("click", () => chooseGranularity(g));
 }
 
-/** Snap the active tab to the nearest stop and write audio when granularity changes. */
+/** Snap a captured tab to the nearest stop when granularity changes. Never captures. */
 function applyGranularity(): void {
   paintMode(true);
-  if (!isGranular() || !last.capturable || tabId === undefined) return;
+  if (!isGranular() || !last.capturable || last.bypassed || tabId === undefined) return;
   const value = valueFromSlider();
   if (compressionOn()) {
     void apply((id) => ({ target: "background", type: "setTarget", tabId: id, percent: value }));

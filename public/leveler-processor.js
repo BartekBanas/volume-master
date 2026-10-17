@@ -6,7 +6,7 @@
  * Parameters (all k-rate):
  *   target    linear RMS amplitude of full scale the leveler aims for.
  *             offscreen.ts sets it on every graph, so the default is only a
- *             fallback; it mirrors DEFAULT_TARGET / MAX_TARGET in src/messages.ts.
+ *             fallback; it mirrors DEFAULT_TARGET (-15 dBFS) in src/messages.ts.
  *   intensity 0 = unity gain, 1 = full leveling; gain = desired ** intensity
  *   bypass    >= 0.5 passes audio through untouched
  */
@@ -21,7 +21,7 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
     return [
       {
         name: "target",
-        defaultValue: 0.5,
+        defaultValue: 0.18,
         minValue: 0,
         maxValue: 1,
         automationRate: "k-rate",

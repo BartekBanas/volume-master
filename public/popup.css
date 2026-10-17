@@ -93,24 +93,87 @@ h1 {
   gap: 6px;
 }
 
-.badge {
-  padding: 3px 8px;
+/* Latching Bypassed chip. Same height and surface as the settings button; lit with the accent while Bypassed. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 11px 0 10px;
   border-radius: 999px;
   font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  line-height: 1;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  /* Blend the accent toward the text color so it stays readable at every hue. */
-  color: color-mix(in srgb, var(--fill-a) 55%, var(--text));
-  background: color-mix(in srgb, var(--fill-a) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--fill-a) 32%, transparent);
-  transition: color var(--tint), background var(--tint), border-color var(--tint);
+  color: var(--muted);
+  transition:
+    color var(--tint),
+    background var(--tint),
+    border-color var(--tint),
+    box-shadow var(--tint),
+    transform 0.1s var(--ease);
 }
 
-main.off .badge {
+.chip:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.chip-led {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: background var(--tint), box-shadow var(--tint);
+}
+
+.chip[aria-pressed="true"] {
+  color: color-mix(in srgb, var(--fill-a) 45%, var(--text));
+  background: color-mix(in srgb, var(--fill-a) 14%, transparent);
+  border-color: color-mix(in srgb, var(--fill-a) 38%, transparent);
+  box-shadow: 0 0 14px -4px color-mix(in srgb, var(--fill-a) 70%, transparent);
+}
+
+.chip[aria-pressed="true"]:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--fill-a) 20%, transparent);
+  border-color: color-mix(in srgb, var(--fill-a) 50%, transparent);
+}
+
+@keyframes chip-led-breathe {
+  50% {
+    box-shadow: 0 0 2px 0 var(--fill-a);
+    opacity: 0.7;
+  }
+}
+
+.chip[aria-pressed="true"] .chip-led {
+  background: color-mix(in srgb, var(--fill-a) 60%, #fff);
+  box-shadow: 0 0 8px 1px var(--fill-a);
+  animation: chip-led-breathe 2.8s ease-in-out infinite;
+}
+
+.chip:disabled,
+.chip:disabled[aria-pressed="true"] {
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.04);
   border-color: var(--panel-edge);
+  box-shadow: none;
+}
+
+.chip:disabled .chip-led {
+  background: var(--faint);
+  box-shadow: none;
+  animation: none;
+}
+
+/* Bypassed dims the same controls that unavailable disables (0.4 opacity). The chip stays lit. */
+main.bypassed :is(.slider-wrap, footer) {
+  opacity: 0.4;
 }
 
 .icon-button {
@@ -313,7 +376,7 @@ main.off .badge {
 .slider-wrap.compression .controls {
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: var(--knob-gap);
-  align-items: center;
+  align-items: end;
 }
 
 .slider-column {
@@ -368,12 +431,30 @@ main.off .badge {
   box-shadow: 0 0 4px color-mix(in srgb, var(--fill-a) 25%, transparent);
 }
 
-#knob[hidden] {
+.knob-column {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+
+.knob-column[hidden] {
   display: none;
 }
 
-#knob:not([hidden]) {
-  align-self: center;
+.knob-label {
+  height: 16px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  text-align: center;
+  user-select: none;
+  transition: color 0.15s var(--ease);
+}
+
+.knob-column:hover .knob-label,
+.knob-column:has(.arc-knob.dragging) .knob-label,
+.knob-column:has(.arc-knob:focus-visible) .knob-label {
+  color: var(--text);
 }
 
 input[type="range"] {
@@ -796,5 +877,9 @@ input:disabled {
 
   .limiter:has(input:checked) {
     transform: none;
+  }
+
+  .chip-led {
+    animation: none !important;
   }
 }
