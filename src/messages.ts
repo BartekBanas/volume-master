@@ -13,11 +13,11 @@ export const NATIVE_POSITION = Math.round(MAX_PERCENT * NATIVE_POSITION_RATIO);
  */
 /** Compression-mode maximum target position; 100 is 0 dBFS RMS. */
 export const MAX_TARGET = 100;
-/** Compression-mode default target position; 50% on the track. */
-export const DEFAULT_TARGET = 50;
+/** Compression-mode default target position; 40% on the track. */
+export const DEFAULT_TARGET = 40;
 /** Exact RMS dBFS at DEFAULT_TARGET. */
-export const DEFAULT_TARGET_DB = -15;
-/** Maps slider position to linear RMS. Fitted so the midpoint is -15 dBFS. */
+export const DEFAULT_TARGET_DB = -20;
+/** Maps slider position to linear RMS. Fitted so DEFAULT_TARGET is -20 dBFS. */
 export const TARGET_GAMMA =
   Math.log(10 ** (DEFAULT_TARGET_DB / 20)) / Math.log(DEFAULT_TARGET / MAX_TARGET);
 /** Leveling strength 0..1; what a tab uses until its knob is touched. */

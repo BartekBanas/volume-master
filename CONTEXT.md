@@ -36,9 +36,9 @@ _Avoid_: auto mode, normalization, limiter
 
 **Target Volume**:
 The RMS audio level the extension aims for. In dB, 0 is full scale and the
-default is −15 dBFS. In percent, the number is the slider position: 0 mute, 50
-the default, 100 full scale. Percent is not linear RMS; 50% is −15 dBFS, not
-−6. Ranges from mute (slider at 0) to 0 dBFS (slider at max). Unlike Volume, it
+default is −20 dBFS. In percent, the number is the slider position: 0 mute, 40
+the default, 100 full scale. Percent is not linear RMS; 40% is −20 dBFS, not
+−8. Ranges from mute (slider at 0) to 0 dBFS (slider at max). Unlike Volume, it
 cannot exceed 0 dBFS / 100%.
 _Avoid_: target gain, target level, loudness
 

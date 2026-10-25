@@ -19,7 +19,7 @@ import { Tamer } from "./tamer.js";
  * Parameters (all k-rate):
  *   target    linear RMS amplitude of full scale the leveler aims for.
  *             offscreen.ts sets it on every graph, so the default is only a
- *             fallback; it mirrors DEFAULT_TARGET (-15 dBFS) in src/messages.ts.
+ *             fallback; it mirrors DEFAULT_TARGET (-20 dBFS) in src/messages.ts.
  *   intensity 0 = unity gain, 1 = full leveling; gain = desired ** intensity
  *   bypass    >= 0.5 passes audio through at unity gain (still delayed)
  */
@@ -29,7 +29,7 @@ const RELEASE_SEC = 0.9; // while level falls: lift quiet gradually
 const NOISE_FLOOR = 0.001; // about -60 dBFS RMS; below this the gain is held
 const MAX_GAIN = 7.94; // about +18 dB; stops the noise floor being amplified
 const MIN_GAIN = 0.05; // about -26 dB
-const PEAK_HEADROOM = 2.82; // +9 dB: peaks may sit this far above target (-6 dBFS at the default)
+const PEAK_HEADROOM = 2.82; // +9 dB: peaks may sit this far above target (-11 dBFS at the default)
 const QUANTUM_FRAMES = 128; // Web Audio render quantum
 
 class AutoLevelerProcessor extends AudioWorkletProcessor {
@@ -37,7 +37,7 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
     return [
       {
         name: "target",
-        defaultValue: 0.18,
+        defaultValue: 0.1,
         minValue: 0,
         maxValue: 1,
         automationRate: "k-rate",
