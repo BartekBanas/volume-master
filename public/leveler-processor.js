@@ -1,4 +1,5 @@
 import { DelayLine, SlidingMax } from "./dsp.js";
+import { Tamer } from "./tamer.js";
 
 /**
  * Auto-leveler: rides gain so the smoothed RMS of the signal approaches
@@ -10,6 +11,10 @@ import { DelayLine, SlidingMax } from "./dsp.js";
  * TTS voice out of silence) is turned down before it is heard. The delay also
  * applies when the `bypass` param is set (Gain mode), so switching between Gain
  * mode and Compression mode never jumps the audio in time.
+ *
+ * The Tamer (tamer.js) rides on the same look-ahead: its gain multiplies the
+ * leveler's, and the leveler measures level as if already tamed, so it does
+ * not lift tamed sound back up. The Tamer is not scaled by intensity.
  *
  * Parameters (all k-rate):
  *   target    linear RMS amplitude of full scale the leveler aims for.
@@ -63,6 +68,7 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
     this.releaseCoeff = Math.exp(-quantumSec / RELEASE_SEC);
     this.meanSquare = 0;
     this.gain = 1;
+    this.tamer = new Tamer(sampleRate, QUANTUM_FRAMES);
     const delaySamples = Math.round(LOOKAHEAD_SEC * sampleRate);
     this.delay = new DelayLine(delaySamples);
     // Quantum peaks covering everything output during the gain ramp to the
@@ -86,11 +92,13 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
 
     // Track level while bypassed too, so the first quantum after enabling
     // starts from a sensible gain instead of unity-from-silence.
-    this.trackLevel(input, channelCount, frames);
+    const tamerGain = this.tamer.update(input, channelCount, frames);
+    this.trackLevel(input, channelCount, frames, tamerGain);
     const nextGain = this.nextGain(
       (parameters.bypass[0] ?? 1) >= 0.5,
       parameters.target[0] ?? 0.5,
       parameters.intensity[0] ?? 0.5,
+      tamerGain,
     );
 
     // Ramp across the quantum so gain changes never step (no zipper noise).
@@ -111,7 +119,7 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
   }
 
   /** Gain to reach by the end of this quantum. */
-  nextGain(bypass, target, intensity) {
+  nextGain(bypass, target, intensity, tamerGain) {
     if (bypass || intensity <= 0) return 1;
     // A 0% target means mute; the MIN_GAIN floor below would leave it audible.
     if (target <= 0) return 0;
@@ -122,7 +130,7 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
       let desired = target / rms;
       if (desired > MAX_GAIN) desired = MAX_GAIN;
       else if (desired < MIN_GAIN) desired = MIN_GAIN;
-      gain = Math.pow(desired, intensity);
+      gain = Math.pow(desired, intensity) * tamerGain;
     }
     // Pull gain down before a peak in the look-ahead window is heard; the RMS
     // smoother alone reacts too late to a loud start.
@@ -131,8 +139,11 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
     return gain;
   }
 
-  /** Fold this quantum into the RMS smoother and the look-ahead peak window. */
-  trackLevel(input, channelCount, frames) {
+  /**
+   * Fold this quantum into the RMS smoother, as heard after `tamerGain`, and
+   * into the look-ahead peak window.
+   */
+  trackLevel(input, channelCount, frames, tamerGain) {
     let sum = 0;
     let count = 0;
     let peak = 0;
@@ -147,7 +158,7 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
       }
       count += frames;
     }
-    const block = count > 0 ? sum / count : 0;
+    const block = count > 0 ? (sum / count) * tamerGain * tamerGain : 0;
     const coeff = block > this.meanSquare ? this.attackCoeff : this.releaseCoeff;
     this.meanSquare = block + coeff * (this.meanSquare - block);
     this.peak = this.peaks.push(peak);

@@ -47,6 +47,14 @@ How strongly the extension adjusts a tab's gain toward its Target Volume. Set
 per tab with the knob beside the target slider.
 _Avoid_: strength, amount, ratio, makeup
 
+**Tamer**:
+The part of Compression mode that turns down sound rising well above the tab's
+usual speech level, such as TTS donations and alert sounds, so they land near
+the voice around them instead of over it. It follows a slow reference of that
+speech level, so a long loud stretch barely moves it. Works at any Intensity
+above 0 and is not scaled by it.
+_Avoid_: ducker, TTS filter, compressor, limiter
+
 **Granular mode**:
 The mode where a slider can only rest on preset stops instead of any value.
 Global, off by default, and applies to both the Volume and Target Volume
