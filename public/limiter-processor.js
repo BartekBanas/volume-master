@@ -1,3 +1,5 @@
+import { SlidingMax } from "./dsp.js";
+
 const THRESHOLD = 0.99;
 const LOOKAHEAD_SEC = 0.005;
 const RELEASE_SEC = 0.05;
@@ -21,6 +23,9 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
     this.delaySamples = Math.max(1, Math.round(LOOKAHEAD_SEC * sampleRate));
     this.writeIndex = 0;
     this.envelope = 0;
+    // Covers every sample still in the delay line plus the one entering, so
+    // the envelope is never below a peak that has yet to be output.
+    this.window = new SlidingMax(this.delaySamples + 1);
     this.buffers = [];
     this.releaseCoeff = Math.exp(-1 / (RELEASE_SEC * sampleRate));
     this.peakReduction = 0;
@@ -61,6 +66,7 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
         const ax = x < 0 ? -x : x;
         if (ax > peak) peak = ax;
       }
+      peak = this.window.push(peak);
 
       if (peak > this.envelope) {
         this.envelope = peak;
@@ -83,12 +89,9 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
         const x = samples ? samples[i] ?? 0 : 0;
         const delayed = this.buffers[c][idx] ?? 0;
         this.buffers[c][idx] = x;
-        let y = bypass ? delayed : delayed * gain;
-        if (!bypass) {
-          if (y > 1) y = 1;
-          else if (y < -1) y = -1;
-        }
-        dest[i] = y;
+        // gain is 1 when bypassed, and otherwise keeps every delayed sample
+        // at or below THRESHOLD, so no hard clip is needed.
+        dest[i] = delayed * gain;
       }
 
       this.writeIndex = idx + 1 === delay ? 0 : idx + 1;
