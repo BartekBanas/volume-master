@@ -13,7 +13,7 @@
 const ATTACK_SEC = 0.12; // smoother time constant while level rises: catch loud fast
 const RELEASE_SEC = 0.9; // while level falls: lift quiet gradually
 const NOISE_FLOOR = 0.001; // about -60 dBFS RMS; below this the gain is held
-const MAX_GAIN = 7.94; // about +18 dB; stops the noise floor being amplified
+const MAX_GAIN = 10 ** (36 / 20); // +36 dB; keeps the -60 dBFS noise floor below -24 dBFS
 const MIN_GAIN = 0.05; // about -26 dB
 
 class AutoLevelerProcessor extends AudioWorkletProcessor {
