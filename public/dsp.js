@@ -37,3 +37,31 @@ export class SlidingMax {
     return this.values[this.head];
   }
 }
+
+/** Multichannel fixed delay: each sample comes back out `length` frames later. */
+export class DelayLine {
+  constructor(length) {
+    this.length = length;
+    this.buffers = [];
+    this.index = 0;
+  }
+
+  ensureChannels(channels) {
+    while (this.buffers.length < channels) {
+      this.buffers.push(new Float32Array(this.length));
+    }
+  }
+
+  /** Store `x` on `channel` and return the sample stored there `length` frames ago. */
+  shift(channel, x) {
+    const buffer = this.buffers[channel];
+    const delayed = buffer[this.index];
+    buffer[this.index] = x;
+    return delayed;
+  }
+
+  /** Move to the next frame once every channel has been shifted. */
+  advance() {
+    this.index = this.index + 1 === this.length ? 0 : this.index + 1;
+  }
+}

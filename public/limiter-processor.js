@@ -1,4 +1,4 @@
-import { SlidingMax } from "./dsp.js";
+import { DelayLine, SlidingMax } from "./dsp.js";
 
 const THRESHOLD = 0.99;
 const LOOKAHEAD_SEC = 0.005;
@@ -20,22 +20,15 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
 
   constructor() {
     super();
-    this.delaySamples = Math.max(1, Math.round(LOOKAHEAD_SEC * sampleRate));
-    this.writeIndex = 0;
+    const delaySamples = Math.max(1, Math.round(LOOKAHEAD_SEC * sampleRate));
+    this.delay = new DelayLine(delaySamples);
     this.envelope = 0;
     // Covers every sample still in the delay line plus the one entering, so
     // the envelope is never below a peak that has yet to be output.
-    this.window = new SlidingMax(this.delaySamples + 1);
-    this.buffers = [];
+    this.window = new SlidingMax(delaySamples + 1);
     this.releaseCoeff = Math.exp(-1 / (RELEASE_SEC * sampleRate));
     this.peakReduction = 0;
     this.meterBlocks = 0;
-  }
-
-  ensureBuffers(channels) {
-    while (this.buffers.length < channels) {
-      this.buffers.push(new Float32Array(this.delaySamples));
-    }
   }
 
   process(inputs, outputs, parameters) {
@@ -51,10 +44,9 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
 
     const frames = outputChannel.length;
     const channelCount = Math.min(input.length, output.length);
-    this.ensureBuffers(channelCount);
+    this.delay.ensureChannels(channelCount);
 
     const bypass = (parameters.bypass[0] ?? 0) >= 0.5;
-    const delay = this.delaySamples;
     const coeff = this.releaseCoeff;
     const threshold = THRESHOLD;
 
@@ -81,20 +73,16 @@ class PeakLimiterProcessor extends AudioWorkletProcessor {
         if (reduction > this.peakReduction) this.peakReduction = reduction;
       }
 
-      const idx = this.writeIndex;
       for (let c = 0; c < channelCount; c++) {
         const samples = input[c];
         const dest = output[c];
         if (!dest) continue;
-        const x = samples ? samples[i] ?? 0 : 0;
-        const delayed = this.buffers[c][idx] ?? 0;
-        this.buffers[c][idx] = x;
+        const delayed = this.delay.shift(c, samples ? samples[i] ?? 0 : 0);
         // gain is 1 when bypassed, and otherwise keeps every delayed sample
         // at or below THRESHOLD, so no hard clip is needed.
         dest[i] = delayed * gain;
       }
-
-      this.writeIndex = idx + 1 === delay ? 0 : idx + 1;
+      this.delay.advance();
     }
 
     this.meterBlocks += 1;
