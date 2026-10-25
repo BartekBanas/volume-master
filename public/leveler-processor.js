@@ -1,20 +1,62 @@
 /**
- * Auto-leveler: rides gain so the smoothed RMS of the signal approaches
- * `target`. Sits between the GainNode and the peak limiter; the limiter
- * downstream catches anything this overshoots.
+ * Auto-leveler: measures 400 ms K-weighted loudness and adjusts gain toward
+ * the target. It sits before the peak limiter, which catches overshoots.
  *
  * Parameters (all k-rate):
- *   target    linear RMS amplitude of full scale the leveler aims for.
- *             offscreen.ts sets it on every graph, so the default is only a
- *             fallback; it mirrors DEFAULT_TARGET (-15 dBFS) in src/messages.ts.
- *   intensity 0 = unity gain, 1 = full leveling; gain = desired ** intensity
- *   bypass    >= 0.5 passes audio through untouched
+ *   target    linear level equivalent for the target LUFS; 0 mutes.
+ *   intensity 0 = unity gain, 1 = full leveling.
+ *   bypass    >= 0.5 passes audio through untouched.
  */
-const ATTACK_SEC = 0.12; // smoother time constant while level rises: catch loud fast
-const RELEASE_SEC = 0.9; // while level falls: lift quiet gradually
-const NOISE_FLOOR = 0.001; // about -60 dBFS RMS; below this the gain is held
-const MAX_GAIN = 10 ** (36 / 20); // +36 dB; keeps the -60 dBFS noise floor below -24 dBFS
-const MIN_GAIN = 0.05; // about -26 dB
+const MOMENTARY_SEC = 0.4;
+const NOISE_FLOOR_LUFS = -60;
+const MAX_GAIN_DB = 36;
+const MIN_GAIN_DB = 20 * Math.log10(0.05);
+const ATTACK_SEC = 0.12;
+const RELEASE_SEC = 0.9;
+
+function makeKWeightingFilters(rate) {
+  const shelfFrequency = 1681.974450955533;
+  const shelfGain = 3.999843853973347;
+  const shelfQ = 0.7071752369554196;
+  const shelfK = Math.tan(Math.PI * shelfFrequency / rate);
+  const shelfHigh = 10 ** (shelfGain / 20);
+  const shelfMid = shelfHigh ** 0.4996667741545416;
+  const shelfA0 = 1 + shelfK / shelfQ + shelfK * shelfK;
+  const shelf = {
+    b0: (shelfHigh + shelfMid * shelfK / shelfQ + shelfK * shelfK) / shelfA0,
+    b1: 2 * (shelfK * shelfK - shelfHigh) / shelfA0,
+    b2: (shelfHigh - shelfMid * shelfK / shelfQ + shelfK * shelfK) / shelfA0,
+    a1: 2 * (shelfK * shelfK - 1) / shelfA0,
+    a2: (1 - shelfK / shelfQ + shelfK * shelfK) / shelfA0,
+  };
+
+  const highPassFrequency = 38.13547087602444;
+  const highPassQ = 0.5003270373238773;
+  const highPassK = Math.tan(Math.PI * highPassFrequency / rate);
+  const highPassA0 = 1 + highPassK / highPassQ + highPassK * highPassK;
+  const highPass = {
+    b0: 1,
+    b1: -2,
+    b2: 1,
+    a1: 2 * (highPassK * highPassK - 1) / highPassA0,
+    a2: (1 - highPassK / highPassQ + highPassK * highPassK) / highPassA0,
+  };
+  return { shelf, highPass };
+}
+
+function filterSample(sample, coefficients, state) {
+  const output = coefficients.b0 * sample + state.z1;
+  state.z1 = coefficients.b1 * sample - coefficients.a1 * output + state.z2;
+  state.z2 = coefficients.b2 * sample - coefficients.a2 * output;
+  return output;
+}
+
+function makeChannelFilters() {
+  return {
+    shelf: { z1: 0, z2: 0 },
+    highPass: { z1: 0, z2: 0 },
+  };
+}
 
 class AutoLevelerProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -45,12 +87,16 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
 
   constructor() {
     super();
-    // One-pole coefficients per render quantum (128 frames), not per sample,
-    // since the mean square is folded in once per process() call.
     const quantumSec = 128 / sampleRate;
     this.attackCoeff = Math.exp(-quantumSec / ATTACK_SEC);
     this.releaseCoeff = Math.exp(-quantumSec / RELEASE_SEC);
-    this.meanSquare = 0;
+    this.filters = makeKWeightingFilters(sampleRate);
+    this.channelFilters = [];
+    this.windowFrames = Math.round(sampleRate * MOMENTARY_SEC);
+    this.energyHistory = new Float64Array(this.windowFrames);
+    this.energyIndex = 0;
+    this.energyFrames = 0;
+    this.windowEnergy = 0;
     this.gain = 1;
   }
 
@@ -75,14 +121,12 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
         if (src) dest.set(src);
         else dest.fill(0);
       }
-      // Track level while bypassed so the first quantum after enabling
-      // starts from a sensible gain instead of unity-from-silence.
-      this.trackLevel(input, channelCount, frames);
+      this.measureLufs(input, channelCount, frames);
       this.gain = 1;
       return true;
     }
 
-    const rms = this.trackLevel(input, channelCount, frames);
+    const lufs = this.measureLufs(input, channelCount, frames);
     const target = parameters.target[0] ?? 0.5;
     const intensity = parameters.intensity[0] ?? 0.5;
 
@@ -90,13 +134,13 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
     if (intensity <= 0) {
       nextGain = 1;
     } else if (target <= 0) {
-      // A 0% target means mute; the MIN_GAIN floor below would leave it audible.
       nextGain = 0;
-    } else if (rms >= NOISE_FLOOR) {
-      let desired = target / rms;
-      if (desired > MAX_GAIN) desired = MAX_GAIN;
-      else if (desired < MIN_GAIN) desired = MIN_GAIN;
-      nextGain = Math.pow(desired, intensity);
+    } else if (lufs !== null && lufs > NOISE_FLOOR_LUFS) {
+      let gainDb = 20 * Math.log10(target) - lufs;
+      gainDb = Math.max(MIN_GAIN_DB, Math.min(MAX_GAIN_DB, gainDb));
+      nextGain = 10 ** (gainDb * intensity / 20);
+      const coeff = nextGain < this.gain ? this.attackCoeff : this.releaseCoeff;
+      nextGain += (this.gain - nextGain) * coeff;
     }
 
     const start = this.gain;
@@ -109,33 +153,42 @@ class AutoLevelerProcessor extends AudioWorkletProcessor {
         dest.fill(0);
         continue;
       }
-      let g = start;
+      let gain = start;
       for (let i = 0; i < frames; i++) {
-        dest[i] = src[i] * g;
-        g += step;
+        dest[i] = src[i] * gain;
+        gain += step;
       }
     }
     this.gain = nextGain;
     return true;
   }
 
-  /** Fold this quantum's mean square into the smoother; returns smoothed RMS. */
-  trackLevel(input, channelCount, frames) {
-    let sum = 0;
-    let count = 0;
+  /** Measure the current 400 ms BS.1770 momentary loudness, without gating. */
+  measureLufs(input, channelCount, frames) {
     for (let c = 0; c < channelCount; c++) {
-      const src = input[c];
-      if (!src) continue;
-      for (let i = 0; i < frames; i++) {
-        const x = src[i];
-        sum += x * x;
-      }
-      count += frames;
+      this.channelFilters[c] ??= makeChannelFilters();
     }
-    const block = count > 0 ? sum / count : 0;
-    const coeff = block > this.meanSquare ? this.attackCoeff : this.releaseCoeff;
-    this.meanSquare = block + coeff * (this.meanSquare - block);
-    return Math.sqrt(this.meanSquare);
+
+    for (let i = 0; i < frames; i++) {
+      let frameEnergy = 0;
+      for (let c = 0; c < channelCount; c++) {
+        const sample = input[c]?.[i] ?? 0;
+        const channel = this.channelFilters[c];
+        const shelf = filterSample(sample, this.filters.shelf, channel.shelf);
+        const weighted = filterSample(shelf, this.filters.highPass, channel.highPass);
+        frameEnergy += weighted * weighted;
+      }
+
+      this.windowEnergy += frameEnergy - this.energyHistory[this.energyIndex];
+      this.energyHistory[this.energyIndex] = frameEnergy;
+      this.energyIndex++;
+      if (this.energyIndex === this.windowFrames) this.energyIndex = 0;
+      if (this.energyFrames < this.windowFrames) this.energyFrames++;
+    }
+
+    if (this.energyFrames < this.windowFrames) return null;
+    const meanSquare = Math.max(0, this.windowEnergy / this.windowFrames);
+    return meanSquare > 0 ? -0.691 + 10 * Math.log10(meanSquare) : Number.NEGATIVE_INFINITY;
   }
 }
 

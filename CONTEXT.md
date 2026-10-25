@@ -30,16 +30,15 @@ _Avoid_: manual mode, normal mode, classic mode
 
 **Compression mode**:
 The mode where the slider sets Target Volume and the extension adjusts gain
-toward that RMS target. Intensity controls how strongly it adjusts. Chosen per
-tab, off by default.
+toward that LUFS target, measured over a 400 ms K-weighted window. Intensity
+controls how strongly it adjusts. Chosen per tab, off by default.
 _Avoid_: auto mode, normalization, limiter
 
 **Target Volume**:
-The RMS audio level the extension aims for. In dB, 0 is full scale and the
-default is −15 dBFS. In percent, the number is the slider position: 0 mute, 50
-the default, 100 full scale. Percent is not linear RMS; 50% is −15 dBFS, not
-−6. Ranges from mute (slider at 0) to 0 dBFS (slider at max). Unlike Volume, it
-cannot exceed 0 dBFS / 100%.
+The perceived loudness the extension aims for. In LUFS, the default is −15
+LUFS and the maximum is 0 LUFS. In percent, the number is the slider position:
+0 mute, 50 the default, 100 the maximum. Unlike Volume, it cannot exceed the
+top of its range.
 _Avoid_: target gain, target level, loudness
 
 **Intensity**:

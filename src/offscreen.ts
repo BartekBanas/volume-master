@@ -3,7 +3,7 @@ import {
   DEFAULT_INTENSITY,
   NATIVE_PERCENT,
   DEFAULT_TARGET,
-  targetToRms,
+  targetToLevel,
 } from "./messages.js";
 
 /**
@@ -19,7 +19,7 @@ type Graph = {
   limiter: AudioWorkletNode | null;
   /** Gain-mode volume. Retained while compression pins the GainNode at 1.0. */
   percent: number;
-  /** Compression-mode target as a square-taper slider position; see targetToRms. */
+  /** Compression-mode LUFS target as a slider position; see targetToLevel. */
   target: number;
   intensity: number;
   compression: boolean;
@@ -52,7 +52,7 @@ function setBypass(node: AudioWorkletNode, enabled: boolean): void {
 function applyMode(graph: Graph): void {
   if (graph.compression && graph.leveler) {
     rampGain(graph.gain, 1);
-    param(graph.leveler, "target")?.setValueAtTime(targetToRms(graph.target), ctx.currentTime);
+    param(graph.leveler, "target")?.setValueAtTime(targetToLevel(graph.target), ctx.currentTime);
     param(graph.leveler, "intensity")?.setValueAtTime(graph.intensity, ctx.currentTime);
     setBypass(graph.leveler, true);
   } else {
@@ -195,7 +195,7 @@ function setTarget(tabId: number, percent: number): void {
   if (!graph) return;
   graph.target = percent;
   if (graph.compression && graph.leveler) {
-    param(graph.leveler, "target")?.setTargetAtTime(targetToRms(percent), ctx.currentTime, 0.02);
+    param(graph.leveler, "target")?.setTargetAtTime(targetToLevel(percent), ctx.currentTime, 0.02);
   }
 }
 

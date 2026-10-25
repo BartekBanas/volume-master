@@ -2,7 +2,7 @@ import {
   dbFromPercent,
   DEFAULT_INTENSITY,
   formatDb,
-  formatTargetDb,
+  formatTargetLufs,
   isCapturableUrl,
   MAX_PERCENT,
   MAX_TARGET,
@@ -244,13 +244,13 @@ function paintUnitLabels(): void {
   const db = unit === "db";
   if (compressionOn()) {
     tickMin.textContent = db ? "−∞" : "0";
-    tickNative.textContent = db ? formatTargetDb(DEFAULT_TARGET) : String(DEFAULT_TARGET);
-    tickMax.textContent = db ? formatTargetDb(MAX_TARGET) : String(MAX_TARGET);
-    readoutLabel.textContent = db ? "Target dBFS" : "Target Volume";
+    tickNative.textContent = db ? formatTargetLufs(DEFAULT_TARGET) : String(DEFAULT_TARGET);
+    tickMax.textContent = db ? formatTargetLufs(MAX_TARGET) : String(MAX_TARGET);
+    readoutLabel.textContent = db ? "Target LUFS" : "Target Volume";
     reset.textContent = db
-      ? `Reset to ${formatTargetDb(DEFAULT_TARGET)} dB`
+      ? `Reset to ${formatTargetLufs(DEFAULT_TARGET)} LUFS`
       : `Reset to ${DEFAULT_TARGET}%`;
-    slider.setAttribute("aria-label", db ? "Target volume in dBFS" : "Target volume");
+    slider.setAttribute("aria-label", db ? "Target loudness in LUFS" : "Target volume");
     return;
   }
   tickMin.textContent = db ? "−∞" : "0";
@@ -271,8 +271,9 @@ function setUnit(next: VolumeUnit): void {
 
 function paintReadout(value: number): void {
   if (unit === "db") {
-    const text = compressionOn() ? formatTargetDb(value) : formatDb(value);
-    readout.innerHTML = `${text}<span class="unit">dB</span>`;
+    const compression = compressionOn();
+    const text = compression ? formatTargetLufs(value) : formatDb(value);
+    readout.innerHTML = `${text}<span class="unit">${compression ? "LUFS" : "dB"}</span>`;
     return;
   }
   readout.innerHTML = `${value}<span class="unit">%</span>`;

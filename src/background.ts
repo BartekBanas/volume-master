@@ -4,7 +4,7 @@ import {
   isCapturableUrl,
   NATIVE_PERCENT,
   DEFAULT_TARGET,
-  dbFromTarget,
+  lufsFromTarget,
   snapPercent,
   snapTarget,
   type BackgroundRequest,
@@ -128,8 +128,8 @@ async function tabState(tabId: number): Promise<OffscreenTabState> {
 /** Compression target for the badge. Follows the Units setting; mute is −∞ or 0. */
 function targetBadge(position: number): string {
   if (settings.unit === "percent") return String(snapTarget(position));
-  const db = dbFromTarget(position);
-  return Number.isFinite(db) ? String(Math.round(db)) : "-∞";
+  const lufs = lufsFromTarget(position);
+  return Number.isFinite(lufs) ? String(Math.round(lufs)) : "-∞";
 }
 
 /**

@@ -6,20 +6,20 @@ export const NATIVE_POSITION = Math.round(MAX_PERCENT * NATIVE_POSITION_RATIO);
 
 /**
  * Compression-mode target is a slider position 0..MAX_TARGET. Percent mode
- * shows that position. Amplitude follows a power taper:
- * RMS = (position / MAX) ** TARGET_GAMMA, fitted so DEFAULT_TARGET is exactly
- * DEFAULT_TARGET_DB. 0 mutes; MAX is 0 dBFS RMS. Not "native": that word means
- * unity gain, which has no counterpart in compression mode.
+ * shows that position. The level equivalent follows a power taper:
+ * level = (position / MAX) ** TARGET_GAMMA, fitted so DEFAULT_TARGET is
+ * exactly DEFAULT_TARGET_LUFS. 0 mutes; MAX is 0 LUFS. Not "native": that
+ * word means unity gain, which has no counterpart in compression mode.
  */
-/** Compression-mode maximum target position; 100 is 0 dBFS RMS. */
+/** Compression-mode maximum target position; 100 is 0 LUFS. */
 export const MAX_TARGET = 100;
 /** Compression-mode default target position; 50% on the track. */
 export const DEFAULT_TARGET = 50;
-/** Exact RMS dBFS at DEFAULT_TARGET. */
-export const DEFAULT_TARGET_DB = -15;
-/** Maps slider position to linear RMS. Fitted so the midpoint is -15 dBFS. */
+/** Exact loudness target at DEFAULT_TARGET. */
+export const DEFAULT_TARGET_LUFS = -15;
+/** Maps slider position to a linear level equivalent. */
 export const TARGET_GAMMA =
-  Math.log(10 ** (DEFAULT_TARGET_DB / 20)) / Math.log(DEFAULT_TARGET / MAX_TARGET);
+  Math.log(10 ** (DEFAULT_TARGET_LUFS / 20)) / Math.log(DEFAULT_TARGET / MAX_TARGET);
 /** Leveling strength 0..1; what a tab uses until its knob is touched. */
 export const DEFAULT_INTENSITY = 0.5;
 
@@ -160,8 +160,8 @@ export function snapTarget(raw: number): number {
   return Math.min(MAX_TARGET, Math.max(0, Math.round(raw)));
 }
 
-/** Linear RMS amplitude the leveler aims for. Position 0 gives 0, which mutes. */
-export function targetToRms(position: number): number {
+/** Linear level equivalent for a LUFS target. Position 0 gives 0, which mutes. */
+export function targetToLevel(position: number): number {
   const p = snapTarget(position);
   if (p <= 0) return 0;
   return (p / MAX_TARGET) ** TARGET_GAMMA;
@@ -181,11 +181,11 @@ export function dbFromPercent(percent: number): number {
   return 20 * Math.log10(p / NATIVE_PERCENT);
 }
 
-/** RMS dBFS from a compression target position. MAX is 0 dBFS, 0 is −∞ (mute). */
-export function dbFromTarget(position: number): number {
-  const rms = targetToRms(position);
-  if (rms <= 0) return Number.NEGATIVE_INFINITY;
-  return 20 * Math.log10(rms);
+/** LUFS target from a compression slider position. 0 is −∞ (mute). */
+export function lufsFromTarget(position: number): number {
+  const level = targetToLevel(position);
+  if (level <= 0) return Number.NEGATIVE_INFINITY;
+  return 20 * Math.log10(level);
 }
 
 function formatDbValue(db: number): string {
@@ -200,6 +200,6 @@ export function formatDb(percent: number): string {
   return formatDbValue(dbFromPercent(percent));
 }
 
-export function formatTargetDb(percent: number): string {
-  return formatDbValue(dbFromTarget(percent));
+export function formatTargetLufs(percent: number): string {
+  return formatDbValue(lufsFromTarget(percent));
 }
