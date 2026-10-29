@@ -532,9 +532,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   transform: translateX(-50%);
 }
 
+/* Labels center on the thumb, whose center travels from thumb/2 to 100% - thumb/2. */
 .ticks span:first-child {
-  left: 0;
-  transform: none;
+  left: calc(var(--thumb) / 2);
 }
 
 .ticks .native {
@@ -542,8 +542,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 }
 
 .ticks span:last-child {
-  left: 100%;
-  transform: translateX(-100%);
+  left: calc(100% - var(--thumb) / 2);
 }
 
 /* arc knob (compression intensity) */
@@ -591,7 +590,8 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   place-items: center;
   font-size: 13px;
   font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  /* Proportional digits: a tabular "1" is as wide as "0" and leaves "100" looking off-center. */
+  font-variant-numeric: proportional-nums;
   color: var(--text);
   pointer-events: none;
 }
