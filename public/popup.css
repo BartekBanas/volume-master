@@ -1,3 +1,19 @@
+@font-face {
+  font-family: Geist;
+  src: url("fonts/geist.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("fonts/geist-mono.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
 
@@ -7,6 +23,8 @@
   --text: #eef0f4;
   --muted: #8b919c;
   --faint: #5b616b;
+  --font: Geist, Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* Set from popup.ts; defaults match native 100%. */
   --fill-a: #7c8cff;
@@ -32,7 +50,7 @@ body {
 
 body {
   width: 320px;
-  font: 13px/1.4 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 13px/1.4 var(--font);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
@@ -516,6 +534,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 .ticks {
   position: relative;
   height: 16px;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--faint);
