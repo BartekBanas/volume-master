@@ -171,7 +171,12 @@ h1 {
   animation: none;
 }
 
-/* Bypassed dims the same controls that unavailable disables (0.4 opacity). The chip stays lit. */
+/* Bypassed dims the same controls that unavailable disables (0.4 opacity). The chip stays lit.
+   The transition is on the base rule so fading in and fading out both animate with the chip. */
+main :is(.slider-wrap, footer) {
+  transition: opacity var(--tint);
+}
+
 main.bypassed :is(.slider-wrap, footer) {
   opacity: 0.4;
 }
